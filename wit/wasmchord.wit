@@ -1,0 +1,88 @@
+// WIT (Wasm Interface Types) definition for wasm-chord
+// Component Model interface for language-agnostic bindings
+
+package wasmchord:runtime@0.1.0;
+
+/// Core runtime interface
+interface runtime {
+    /// Runtime initialization configuration
+    record config {
+        max-memory-bytes: option<u64>,
+        deterministic: option<bool>,
+        gpu-enabled: option<bool>,
+        num-threads: option<u32>,
+    }
+
+    /// Generation options for inference
+    record gen-options {
+        max-tokens: u32,
+        temperature: float32,
+        top-p: float32,
+        top-k: u32,
+        seed: u32,
+        stop-tokens: list<u32>,
+    }
+
+    /// Model metadata
+    record model-meta {
+        architecture: string,
+        vocab-size: option<u32>,
+        tensor-count: u64,
+    }
+
+    /// Error types
+    variant runtime-error {
+        invalid-config(string),
+        model-parse-error(string),
+        out-of-memory(string),
+        backend-error(string),
+        invalid-handle(string),
+    }
+
+    /// Model handle (opaque)
+    type model-handle = u32;
+
+    /// Stream handle (opaque)
+    type stream-handle = u32;
+
+    /// Initialize runtime with optional config JSON
+    init: func(config-json: option<string>) -> result<_, runtime-error>;
+
+    /// Load model from bytes
+    load-model: func(data: list<u8>) -> result<model-handle, runtime-error>;
+
+    /// Get model metadata
+    get-model-meta: func(model: model-handle) -> result<model-meta, runtime-error>;
+
+    /// Free model from memory
+    free-model: func(model: model-handle) -> result<_, runtime-error>;
+
+    /// Start inference (returns stream handle)
+    infer-stream: func(
+        model: model-handle,
+        prompt: string,
+        options: gen-options
+    ) -> result<stream-handle, runtime-error>;
+
+    /// Get next token from stream
+    /// Returns none when stream is complete
+    next-token: func(stream: stream-handle) -> result<option<string>, runtime-error>;
+
+    /// Close inference stream
+    close-stream: func(stream: stream-handle) -> result<_, runtime-error>;
+
+    /// Blocking inference (convenience method)
+    infer: func(
+        model: model-handle,
+        prompt: string,
+        options: gen-options
+    ) -> result<string, runtime-error>;
+
+    /// Get runtime version
+    version: func() -> string;
+}
+
+/// Export the runtime interface
+world wasmchord {
+    export runtime;
+}
