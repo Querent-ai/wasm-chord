@@ -100,18 +100,32 @@ impl Tokenizer {
 
         // Extract special tokens (with fallback defaults)
         let special_tokens = SpecialTokens {
-            bos_token: metadata.get("tokenizer.ggml.bos_token").cloned().unwrap_or_else(|| "<s>".to_string()),
-            eos_token: metadata.get("tokenizer.ggml.eos_token").cloned().unwrap_or_else(|| "</s>".to_string()),
-            unk_token: metadata.get("tokenizer.ggml.unk_token").cloned().unwrap_or_else(|| "<unk>".to_string()),
+            bos_token: metadata
+                .get("tokenizer.ggml.bos_token")
+                .cloned()
+                .unwrap_or_else(|| "<s>".to_string()),
+            eos_token: metadata
+                .get("tokenizer.ggml.eos_token")
+                .cloned()
+                .unwrap_or_else(|| "</s>".to_string()),
+            unk_token: metadata
+                .get("tokenizer.ggml.unk_token")
+                .cloned()
+                .unwrap_or_else(|| "<unk>".to_string()),
             pad_token: metadata.get("tokenizer.ggml.pad_token").cloned(),
-            bos_token_id: metadata.get("tokenizer.ggml.bos_token_id")
-                .and_then(|s| s.parse().ok()).unwrap_or(1),
-            eos_token_id: metadata.get("tokenizer.ggml.eos_token_id")
-                .and_then(|s| s.parse().ok()).unwrap_or(2),
-            unk_token_id: metadata.get("tokenizer.ggml.unk_token_id")
-                .and_then(|s| s.parse().ok()).unwrap_or(0),
-            pad_token_id: metadata.get("tokenizer.ggml.pad_token_id")
-                .and_then(|s| s.parse().ok()),
+            bos_token_id: metadata
+                .get("tokenizer.ggml.bos_token_id")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1),
+            eos_token_id: metadata
+                .get("tokenizer.ggml.eos_token_id")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(2),
+            unk_token_id: metadata
+                .get("tokenizer.ggml.unk_token_id")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            pad_token_id: metadata.get("tokenizer.ggml.pad_token_id").and_then(|s| s.parse().ok()),
         };
 
         // BPE merges (if available)

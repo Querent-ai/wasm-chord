@@ -1,6 +1,6 @@
+use std::collections::VecDeque;
 /// Inference session management with token streaming
 use wasm_chord_core::error::Result;
-use std::collections::VecDeque;
 
 /// Generation options
 #[repr(C)]
@@ -195,8 +195,7 @@ mod tests {
 
     #[test]
     fn test_max_tokens_limit() {
-        let mut options = GenOptions::default();
-        options.max_tokens = 5;
+        let options = GenOptions { max_tokens: 5, ..Default::default() };
 
         let mut session = InferenceSession::new(1, vec![1, 2, 3], options);
 

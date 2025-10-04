@@ -7,6 +7,7 @@ use wasm_chord_cpu::matmul_f32;
 
 /// Transformer configuration
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct TransformerConfig {
     /// Vocabulary size
     pub vocab_size: usize,
@@ -35,7 +36,7 @@ impl Default for TransformerConfig {
             hidden_size: 2048,
             num_layers: 22,
             num_heads: 32,
-            num_kv_heads: 4,  // GQA: Grouped Query Attention
+            num_kv_heads: 4, // GQA: Grouped Query Attention
             intermediate_size: 5632,
             max_seq_len: 2048,
             rms_norm_eps: 1e-5,
@@ -46,6 +47,7 @@ impl Default for TransformerConfig {
 
 /// KV cache for a single layer
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct KVCache {
     /// Cached keys [batch, seq_len, num_kv_heads, head_dim]
     pub keys: Vec<f32>,
@@ -57,15 +59,11 @@ pub struct KVCache {
     pub max_size: usize,
 }
 
+#[allow(dead_code)]
 impl KVCache {
     pub fn new(max_seq_len: usize, num_kv_heads: usize, head_dim: usize) -> Self {
         let max_size = max_seq_len * num_kv_heads * head_dim;
-        Self {
-            keys: vec![0.0; max_size],
-            values: vec![0.0; max_size],
-            seq_pos: 0,
-            max_size,
-        }
+        Self { keys: vec![0.0; max_size], values: vec![0.0; max_size], seq_pos: 0, max_size }
     }
 
     pub fn clear(&mut self) {
@@ -88,11 +86,13 @@ impl KVCache {
 }
 
 /// Multi-head attention layer
+#[allow(dead_code)]
 pub struct MultiHeadAttention {
     config: TransformerConfig,
     head_dim: usize,
 }
 
+#[allow(dead_code)]
 impl MultiHeadAttention {
     pub fn new(config: TransformerConfig) -> Self {
         let head_dim = config.hidden_size / config.num_heads;
@@ -125,14 +125,7 @@ impl MultiHeadAttention {
         let mut v = vec![0.0; seq_len * self.config.num_kv_heads * self.head_dim];
 
         // Q projection: [seq_len, hidden_size] x [hidden_size, hidden_size]
-        matmul_f32(
-            hidden_states,
-            &weights.wq,
-            &mut q,
-            seq_len,
-            hidden_size,
-            hidden_size,
-        )?;
+        matmul_f32(hidden_states, &weights.wq, &mut q, seq_len, hidden_size, hidden_size)?;
 
         // K projection: [seq_len, hidden_size] x [hidden_size, num_kv_heads * head_dim]
         matmul_f32(
@@ -231,6 +224,7 @@ impl MultiHeadAttention {
 
 /// Attention weight matrices
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct AttentionWeights {
     /// Query projection [hidden_size, hidden_size]
     pub wq: Vec<f32>,
@@ -242,6 +236,7 @@ pub struct AttentionWeights {
     pub wo: Vec<f32>,
 }
 
+#[allow(dead_code)]
 impl AttentionWeights {
     pub fn new(config: &TransformerConfig) -> Self {
         let hidden_size = config.hidden_size;
@@ -257,27 +252,32 @@ impl AttentionWeights {
 }
 
 /// Feed-forward network layer
+#[allow(dead_code)]
 pub struct FeedForward {
     config: TransformerConfig,
 }
 
+#[allow(dead_code)]
 impl FeedForward {
     pub fn new(config: TransformerConfig) -> Self {
         Self { config }
     }
 
-    pub fn forward(
-        &self,
-        hidden_states: &[f32],
-        weights: &FFNWeights,
-    ) -> Result<Vec<f32>> {
+    pub fn forward(&self, hidden_states: &[f32], weights: &FFNWeights) -> Result<Vec<f32>> {
         let seq_len = hidden_states.len() / self.config.hidden_size;
         let hidden_size = self.config.hidden_size;
         let intermediate_size = self.config.intermediate_size;
 
         // Gate projection
         let mut gate = vec![0.0; seq_len * intermediate_size];
-        matmul_f32(hidden_states, &weights.w_gate, &mut gate, seq_len, hidden_size, intermediate_size)?;
+        matmul_f32(
+            hidden_states,
+            &weights.w_gate,
+            &mut gate,
+            seq_len,
+            hidden_size,
+            intermediate_size,
+        )?;
 
         // Up projection
         let mut up = vec![0.0; seq_len * intermediate_size];
@@ -299,6 +299,7 @@ impl FeedForward {
 
 /// FFN weight matrices
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct FFNWeights {
     /// Gate projection [hidden_size, intermediate_size]
     pub w_gate: Vec<f32>,
@@ -308,6 +309,7 @@ pub struct FFNWeights {
     pub w_down: Vec<f32>,
 }
 
+#[allow(dead_code)]
 impl FFNWeights {
     pub fn new(config: &TransformerConfig) -> Self {
         let hidden_size = config.hidden_size;
@@ -322,6 +324,7 @@ impl FFNWeights {
 }
 
 /// Single transformer layer
+#[allow(dead_code)]
 pub struct TransformerLayer {
     pub attention: MultiHeadAttention,
     pub ffn: FeedForward,
@@ -331,6 +334,7 @@ pub struct TransformerLayer {
     pub ffn_norm: Vec<f32>,
 }
 
+#[allow(dead_code)]
 impl TransformerLayer {
     pub fn new(config: &TransformerConfig) -> Self {
         Self {
@@ -353,7 +357,8 @@ impl TransformerLayer {
 
         // 1. Attention block with residual
         let normed = self.rms_norm(hidden_states, &self.attention_norm)?;
-        let attn_output = self.attention.forward(&normed, &self.attention_weights, kv_cache, position)?;
+        let attn_output =
+            self.attention.forward(&normed, &self.attention_weights, kv_cache, position)?;
 
         let mut hidden = hidden_states.to_vec();
         for i in 0..hidden.len() {
