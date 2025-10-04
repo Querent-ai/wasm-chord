@@ -9,7 +9,8 @@ mod transformer;
 
 pub use abi::*;
 pub use context::RuntimeContext;
-pub use inference::InferenceSession;
+pub use inference::{GenOptions, GenerationState, InferenceSession};
+pub use transformer::{Model, TransformerConfig};
 
 use wasm_chord_core::error::Error;
 

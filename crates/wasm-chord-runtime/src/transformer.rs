@@ -399,6 +399,245 @@ impl TransformerLayer {
     }
 }
 
+/// Complete transformer model with embeddings and output head
+pub struct Model {
+    /// Model configuration
+    pub config: TransformerConfig,
+    /// Token embeddings [vocab_size, hidden_size]
+    pub token_embeddings: Vec<f32>,
+    /// Transformer layers
+    pub layers: Vec<TransformerLayer>,
+    /// Output normalization
+    pub output_norm: Vec<f32>,
+    /// LM head (language model head) [hidden_size, vocab_size]
+    /// Often tied with token_embeddings (weight sharing)
+    pub lm_head: Vec<f32>,
+    /// KV caches for each layer
+    pub kv_caches: Vec<KVCache>,
+}
+
+impl Model {
+    /// Create a new model with initialized (zero) weights
+    pub fn new(config: TransformerConfig) -> Self {
+        let mut layers = Vec::new();
+        let mut kv_caches = Vec::new();
+        let head_dim = config.hidden_size / config.num_heads;
+
+        for _ in 0..config.num_layers {
+            layers.push(TransformerLayer::new(&config));
+            kv_caches.push(KVCache::new(config.max_seq_len, config.num_kv_heads, head_dim));
+        }
+
+        Self {
+            token_embeddings: vec![0.0; config.vocab_size * config.hidden_size],
+            output_norm: vec![1.0; config.hidden_size],
+            lm_head: vec![0.0; config.hidden_size * config.vocab_size],
+            kv_caches,
+            layers,
+            config,
+        }
+    }
+
+    /// Load weights from GGUF tensors
+    pub fn load_from_gguf<R: std::io::Read + std::io::Seek>(
+        &mut self,
+        tensor_loader: &mut wasm_chord_core::tensor_loader::TensorLoader,
+        parser: &mut wasm_chord_core::formats::gguf::GGUFParser<R>,
+    ) -> Result<()> {
+        use wasm_chord_core::error::Error;
+
+        // Load token embeddings
+        if let Ok(embedding_data) = tensor_loader.load_tensor("token_embd.weight", parser) {
+            self.token_embeddings.copy_from_slice(embedding_data);
+        } else {
+            return Err(Error::ParseError("Missing token embeddings".to_string()));
+        }
+
+        // Load output norm
+        if let Ok(norm_data) = tensor_loader.load_tensor("output_norm.weight", parser) {
+            self.output_norm.copy_from_slice(norm_data);
+        }
+
+        // Load LM head (or tie with embeddings)
+        if let Ok(lm_head_data) = tensor_loader.load_tensor("output.weight", parser) {
+            self.lm_head.copy_from_slice(lm_head_data);
+        } else {
+            // Weight tying: LM head shares weights with token embeddings
+            self.lm_head.copy_from_slice(&self.token_embeddings);
+        }
+
+        // Load each layer's weights
+        for layer_idx in 0..self.config.num_layers {
+            let layer = &mut self.layers[layer_idx];
+
+            // Attention weights
+            let wq_name = format!("blk.{}.attn_q.weight", layer_idx);
+            let wk_name = format!("blk.{}.attn_k.weight", layer_idx);
+            let wv_name = format!("blk.{}.attn_v.weight", layer_idx);
+            let wo_name = format!("blk.{}.attn_output.weight", layer_idx);
+
+            if let Ok(wq) = tensor_loader.load_tensor(&wq_name, parser) {
+                layer.attention_weights.wq.copy_from_slice(wq);
+            }
+            if let Ok(wk) = tensor_loader.load_tensor(&wk_name, parser) {
+                layer.attention_weights.wk.copy_from_slice(wk);
+            }
+            if let Ok(wv) = tensor_loader.load_tensor(&wv_name, parser) {
+                layer.attention_weights.wv.copy_from_slice(wv);
+            }
+            if let Ok(wo) = tensor_loader.load_tensor(&wo_name, parser) {
+                layer.attention_weights.wo.copy_from_slice(wo);
+            }
+
+            // Attention norm
+            let attn_norm_name = format!("blk.{}.attn_norm.weight", layer_idx);
+            if let Ok(norm) = tensor_loader.load_tensor(&attn_norm_name, parser) {
+                layer.attention_norm.copy_from_slice(norm);
+            }
+
+            // FFN weights
+            let ffn_gate_name = format!("blk.{}.ffn_gate.weight", layer_idx);
+            let ffn_up_name = format!("blk.{}.ffn_up.weight", layer_idx);
+            let ffn_down_name = format!("blk.{}.ffn_down.weight", layer_idx);
+
+            if let Ok(gate) = tensor_loader.load_tensor(&ffn_gate_name, parser) {
+                layer.ffn_weights.w_gate.copy_from_slice(gate);
+            }
+            if let Ok(up) = tensor_loader.load_tensor(&ffn_up_name, parser) {
+                layer.ffn_weights.w_up.copy_from_slice(up);
+            }
+            if let Ok(down) = tensor_loader.load_tensor(&ffn_down_name, parser) {
+                layer.ffn_weights.w_down.copy_from_slice(down);
+            }
+
+            // FFN norm
+            let ffn_norm_name = format!("blk.{}.ffn_norm.weight", layer_idx);
+            if let Ok(norm) = tensor_loader.load_tensor(&ffn_norm_name, parser) {
+                layer.ffn_norm.copy_from_slice(norm);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Forward pass through the model
+    ///
+    /// # Arguments
+    /// * `token_ids` - Input token IDs [seq_len]
+    /// * `position` - Current position in sequence (for KV cache)
+    ///
+    /// # Returns
+    /// Logits [seq_len, vocab_size]
+    pub fn forward(&mut self, token_ids: &[u32], position: usize) -> Result<Vec<f32>> {
+        let seq_len = token_ids.len();
+        let hidden_size = self.config.hidden_size;
+
+        // 1. Embed tokens
+        let mut hidden_states = vec![0.0; seq_len * hidden_size];
+        for (i, &token_id) in token_ids.iter().enumerate() {
+            let emb_start = (token_id as usize) * hidden_size;
+            let emb_end = emb_start + hidden_size;
+            let out_start = i * hidden_size;
+            let out_end = out_start + hidden_size;
+
+            if emb_end <= self.token_embeddings.len() {
+                hidden_states[out_start..out_end]
+                    .copy_from_slice(&self.token_embeddings[emb_start..emb_end]);
+            }
+        }
+
+        // 2. Pass through transformer layers
+        for layer_idx in 0..self.config.num_layers {
+            let kv_cache = &mut self.kv_caches[layer_idx];
+            hidden_states = self.layers[layer_idx].forward(&hidden_states, kv_cache, position)?;
+        }
+
+        // 3. Final normalization
+        hidden_states = self.rms_norm(&hidden_states, &self.output_norm)?;
+
+        // 4. Project to vocabulary (LM head)
+        let vocab_size = self.config.vocab_size;
+        let mut logits = vec![0.0; seq_len * vocab_size];
+
+        matmul_f32(&hidden_states, &self.lm_head, &mut logits, seq_len, hidden_size, vocab_size)?;
+
+        Ok(logits)
+    }
+
+    /// Sample next token from logits
+    ///
+    /// # Arguments
+    /// * `logits` - Logits for last position [vocab_size]
+    /// * `temperature` - Sampling temperature (default 1.0)
+    /// * `top_p` - Nucleus sampling threshold (default 1.0 = disabled)
+    /// * `top_k` - Top-k sampling (default 0 = disabled)
+    ///
+    /// # Returns
+    /// Sampled token ID
+    pub fn sample(
+        &self,
+        logits: &[f32],
+        temperature: f32,
+        _top_p: f32,
+        _top_k: u32,
+    ) -> Result<u32> {
+        // Apply temperature
+        let scaled_logits: Vec<f32> = if temperature > 0.0 {
+            logits.iter().map(|&x| x / temperature).collect()
+        } else {
+            logits.to_vec()
+        };
+
+        // Find max for numerical stability
+        let max_logit = scaled_logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+
+        // Softmax
+        let exp_logits: Vec<f32> = scaled_logits.iter().map(|&x| (x - max_logit).exp()).collect();
+        let sum_exp: f32 = exp_logits.iter().sum();
+        let probs: Vec<f32> = exp_logits.iter().map(|&x| x / sum_exp).collect();
+
+        // TODO: Implement top-p and top-k sampling
+        // For now: greedy sampling (argmax)
+        let token_id = probs
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(idx, _)| idx as u32)
+            .unwrap_or(0);
+
+        Ok(token_id)
+    }
+
+    /// Clear all KV caches (for new sequence)
+    pub fn clear_kv_cache(&mut self) {
+        for cache in &mut self.kv_caches {
+            cache.clear();
+        }
+    }
+
+    fn rms_norm(&self, input: &[f32], weight: &[f32]) -> Result<Vec<f32>> {
+        let hidden_size = weight.len();
+        let seq_len = input.len() / hidden_size;
+        let mut output = vec![0.0; input.len()];
+
+        for seq in 0..seq_len {
+            let offset = seq * hidden_size;
+            let slice = &input[offset..offset + hidden_size];
+
+            // Compute RMS
+            let sum_sq: f32 = slice.iter().map(|&x| x * x).sum();
+            let rms = (sum_sq / hidden_size as f32).sqrt() + self.config.rms_norm_eps;
+
+            // Normalize and scale
+            for i in 0..hidden_size {
+                output[offset + i] = (slice[i] / rms) * weight[i];
+            }
+        }
+
+        Ok(output)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,5 +673,66 @@ mod tests {
 
         assert_eq!(weights.w_gate.len(), config.hidden_size * config.intermediate_size);
         assert_eq!(weights.w_down.len(), config.intermediate_size * config.hidden_size);
+    }
+
+    #[test]
+    fn test_model_creation() {
+        let config = TransformerConfig::default();
+        let model = Model::new(config.clone());
+
+        assert_eq!(model.layers.len(), config.num_layers);
+        assert_eq!(model.kv_caches.len(), config.num_layers);
+        assert_eq!(model.token_embeddings.len(), config.vocab_size * config.hidden_size);
+        assert_eq!(model.lm_head.len(), config.hidden_size * config.vocab_size);
+    }
+
+    #[test]
+    fn test_model_forward_pass() {
+        // Create a tiny config for testing
+        let config = TransformerConfig {
+            vocab_size: 100,
+            hidden_size: 64,
+            num_layers: 2,
+            num_heads: 4,
+            num_kv_heads: 2,
+            intermediate_size: 128,
+            max_seq_len: 128,
+            rms_norm_eps: 1e-5,
+            rope_theta: 10000.0,
+        };
+
+        let mut model = Model::new(config);
+
+        // Test forward pass with a small sequence
+        let input_tokens = vec![1, 2, 3];
+        let result = model.forward(&input_tokens, 0);
+
+        assert!(result.is_ok());
+        let logits = result.unwrap();
+        assert_eq!(logits.len(), input_tokens.len() * model.config.vocab_size);
+    }
+
+    #[test]
+    fn test_model_sampling() {
+        let config = TransformerConfig {
+            vocab_size: 10,
+            hidden_size: 8,
+            num_layers: 1,
+            num_heads: 2,
+            num_kv_heads: 1,
+            intermediate_size: 16,
+            max_seq_len: 32,
+            rms_norm_eps: 1e-5,
+            rope_theta: 10000.0,
+        };
+
+        let model = Model::new(config);
+
+        // Create test logits (favor token 5)
+        let mut logits = vec![0.0; 10];
+        logits[5] = 10.0;
+
+        let sampled = model.sample(&logits, 1.0, 1.0, 0).unwrap();
+        assert_eq!(sampled, 5);
     }
 }

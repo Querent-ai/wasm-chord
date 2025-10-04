@@ -135,6 +135,68 @@ impl InferenceSession {
         Ok(Some(token_id))
     }
 
+    /// Generate next token using a model
+    ///
+    /// This is the real inference method that uses the transformer model.
+    ///
+    /// # Arguments
+    /// * `model` - The transformer model to use for inference
+    ///
+    /// # Returns
+    /// Next token ID, or None if generation is complete
+    pub fn next_token_with_model(
+        &mut self,
+        model: &mut crate::transformer::Model,
+    ) -> Result<Option<u32>> {
+        // Check if already complete
+        if self.is_complete() {
+            return Ok(None);
+        }
+
+        // Mark as generating
+        if self.state == GenerationState::Ready {
+            self.state = GenerationState::Generating;
+        }
+
+        // Check max tokens limit
+        if self.tokens_generated >= self.options.max_tokens as usize {
+            self.state = GenerationState::Complete;
+            return Ok(None);
+        }
+
+        // Build input sequence: prompt + generated tokens
+        let mut input_tokens = self.prompt_tokens.clone();
+        input_tokens.extend_from_slice(&self.generated_tokens);
+
+        // Run model forward pass
+        let logits = model.forward(&input_tokens, input_tokens.len() - 1)?;
+
+        // Extract logits for last position
+        let vocab_size = model.config.vocab_size;
+        let last_logits = &logits[logits.len() - vocab_size..];
+
+        // Sample next token
+        let token_id = model.sample(
+            last_logits,
+            self.options.temperature,
+            self.options.top_p,
+            self.options.top_k,
+        )?;
+
+        // Check stop tokens
+        if self.stop_tokens.contains(&token_id) {
+            self.state = GenerationState::Stopped;
+            return Ok(None);
+        }
+
+        // Buffer the token
+        self.token_buffer.push_back(token_id);
+        self.generated_tokens.push(token_id);
+        self.tokens_generated += 1;
+
+        Ok(Some(token_id))
+    }
+
     /// Get buffered tokens (for batch processing)
     pub fn drain_buffer(&mut self) -> Vec<u32> {
         self.token_buffer.drain(..).collect()

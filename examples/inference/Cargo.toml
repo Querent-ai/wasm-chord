@@ -1,0 +1,12 @@
+[package]
+name = "wasm-chord-inference-example"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "inference"
+path = "main.rs"
+
+[dependencies]
+wasm-chord-core.workspace = true
+wasm-chord-runtime.workspace = true

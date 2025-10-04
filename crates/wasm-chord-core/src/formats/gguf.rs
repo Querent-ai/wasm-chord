@@ -86,6 +86,31 @@ impl<R: Read + Seek> GGUFParser<R> {
         Ok(buffer)
     }
 
+    /// Get data offset (for TensorLoader)
+    pub fn data_offset(&self) -> u64 {
+        // This would be calculated after parsing header
+        // For now, return a placeholder
+        0
+    }
+
+    /// Get tensor information
+    pub fn tensor_info(&self) -> Vec<(String, TensorDesc, u64)> {
+        if let Some(meta) = &self.meta {
+            meta.tensors
+                .iter()
+                .enumerate()
+                .map(|(i, desc)| (format!("tensor_{}", i), desc.clone(), 0))
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Get metadata (if parsed)
+    pub fn metadata(&self) -> Option<&ModelMeta> {
+        self.meta.as_ref()
+    }
+
     // Helper methods
 
     fn read_u32(&mut self) -> Result<u32> {

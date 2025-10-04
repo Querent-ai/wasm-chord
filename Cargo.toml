@@ -6,6 +6,7 @@ members = [
     "crates/wasm-chord-gpu",
     "crates/wasm-chord-cpu",
     "examples/cli",
+    "examples/inference",
 ]
 
 [workspace.package]
