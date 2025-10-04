@@ -1,11 +1,10 @@
 /// GGUF (GPT-Generated Unified Format) streaming parser
 ///
 /// Specification: https://github.com/ggerganov/ggml/blob/master/docs/gguf.md
-
 use crate::error::{Error, Result};
 use crate::tensor::{DataType, Shape, TensorDesc};
-use std::io::{Read, Seek, SeekFrom};
 use serde::{Deserialize, Serialize};
+use std::io::{Read, Seek, SeekFrom};
 
 /// GGUF magic number (version 3)
 const GGUF_MAGIC: u32 = 0x46554747; // "GGUF"
@@ -30,10 +29,7 @@ pub struct GGUFParser<R: Read + Seek> {
 
 impl<R: Read + Seek> GGUFParser<R> {
     pub fn new(reader: R) -> Self {
-        Self {
-            reader,
-            meta: None,
-        }
+        Self { reader, meta: None }
     }
 
     /// Parse GGUF header and extract metadata
@@ -41,19 +37,13 @@ impl<R: Read + Seek> GGUFParser<R> {
         // Read magic
         let magic = self.read_u32()?;
         if magic != GGUF_MAGIC {
-            return Err(Error::InvalidFormat(format!(
-                "Invalid GGUF magic: 0x{:08X}",
-                magic
-            )));
+            return Err(Error::InvalidFormat(format!("Invalid GGUF magic: 0x{:08X}", magic)));
         }
 
         // Read version
         let version = self.read_u32()?;
         if version != GGUF_VERSION {
-            return Err(Error::InvalidFormat(format!(
-                "Unsupported GGUF version: {}",
-                version
-            )));
+            return Err(Error::InvalidFormat(format!("Unsupported GGUF version: {}", version)));
         }
 
         // Read counts
@@ -71,11 +61,11 @@ impl<R: Read + Seek> GGUFParser<R> {
             version,
             tensor_count,
             metadata_kv_count,
-            architecture: metadata.get("general.architecture")
+            architecture: metadata
+                .get("general.architecture")
                 .cloned()
                 .unwrap_or_else(|| "unknown".to_string()),
-            vocab_size: metadata.get("vocab_size")
-                .and_then(|v| v.parse().ok()),
+            vocab_size: metadata.get("vocab_size").and_then(|v| v.parse().ok()),
             tensors,
         };
 
@@ -114,8 +104,7 @@ impl<R: Read + Seek> GGUFParser<R> {
         let len = self.read_u64()? as usize;
         let mut buf = vec![0u8; len];
         self.reader.read_exact(&mut buf)?;
-        String::from_utf8(buf)
-            .map_err(|e| Error::ParseError(format!("Invalid UTF-8: {}", e)))
+        String::from_utf8(buf).map_err(|e| Error::ParseError(format!("Invalid UTF-8: {}", e)))
     }
 
     fn parse_metadata(&mut self, count: u64) -> Result<std::collections::HashMap<String, String>> {

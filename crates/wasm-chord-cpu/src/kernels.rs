@@ -1,8 +1,7 @@
 /// Additional tensor kernels (softmax, layernorm, etc.)
-
 use wasm_chord_core::error::Result;
 
-/// Softmax activation: output[i] = exp(input[i]) / sum(exp(input))
+/// Softmax activation: `output[i] = exp(input[i]) / sum(exp(input))`
 pub fn softmax(input: &[f32], output: &mut [f32]) -> Result<()> {
     assert_eq!(input.len(), output.len());
 
@@ -25,7 +24,7 @@ pub fn softmax(input: &[f32], output: &mut [f32]) -> Result<()> {
     Ok(())
 }
 
-/// ReLU activation: output[i] = max(0, input[i])
+/// ReLU activation: `output[i] = max(0, input[i])`
 pub fn relu(input: &[f32], output: &mut [f32]) -> Result<()> {
     assert_eq!(input.len(), output.len());
 
@@ -68,8 +67,7 @@ pub fn layer_norm(
     let mean: f32 = input.iter().sum::<f32>() / input.len() as f32;
 
     // Compute variance
-    let variance: f32 = input.iter().map(|&x| (x - mean).powi(2)).sum::<f32>()
-        / input.len() as f32;
+    let variance: f32 = input.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / input.len() as f32;
 
     let std = (variance + eps).sqrt();
 

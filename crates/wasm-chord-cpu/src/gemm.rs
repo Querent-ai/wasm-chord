@@ -1,7 +1,6 @@
 /// General Matrix Multiply (GEMM) kernels
 ///
 /// Implements naive and blocked matrix multiplication for f32.
-
 use wasm_chord_core::error::{Error, Result};
 
 /// Naive matrix multiplication: C = A * B
@@ -9,14 +8,7 @@ use wasm_chord_core::error::{Error, Result};
 /// A: [M, K]
 /// B: [K, N]
 /// C: [M, N]
-pub fn matmul_f32(
-    a: &[f32],
-    b: &[f32],
-    c: &mut [f32],
-    m: usize,
-    k: usize,
-    n: usize,
-) -> Result<()> {
+pub fn matmul_f32(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: usize) -> Result<()> {
     if a.len() != m * k {
         return Err(Error::InvalidShape(format!(
             "Matrix A size mismatch: expected {}, got {}",

@@ -1,7 +1,6 @@
 /// C ABI exports for wasm-chord runtime
 ///
 /// Provides stable FFI interface for host languages.
-
 use crate::{context::*, inference::*, set_last_error, take_last_error, ErrorCode};
 use std::ffi::CStr;
 use std::os::raw::c_char;
@@ -47,10 +46,7 @@ pub extern "C" fn wasmchord_init(config_ptr: *const u8, config_len: usize) -> u3
 ///
 /// Returns model handle (>0) on success, 0 on error.
 #[no_mangle]
-pub extern "C" fn wasmchord_load_model(
-    model_bytes_ptr: *const u8,
-    model_bytes_len: usize,
-) -> u32 {
+pub extern "C" fn wasmchord_load_model(model_bytes_ptr: *const u8, model_bytes_len: usize) -> u32 {
     if model_bytes_ptr.is_null() || model_bytes_len == 0 {
         set_last_error("Invalid model data pointer".to_string());
         return 0;
@@ -73,10 +69,7 @@ pub extern "C" fn wasmchord_load_model(
         }
     };
 
-    let model = ModelHandle {
-        name: "loaded_model".to_string(),
-        meta,
-    };
+    let model = ModelHandle { name: "loaded_model".to_string(), meta };
 
     let mut runtime = RUNTIME.lock().unwrap();
     if let Some(ref mut rt) = *runtime {
@@ -128,11 +121,7 @@ pub extern "C" fn wasmchord_infer(
         }
     };
 
-    let options = if opts_ptr.is_null() {
-        GenOptions::default()
-    } else {
-        unsafe { *opts_ptr }
-    };
+    let options = if opts_ptr.is_null() { GenOptions::default() } else { unsafe { *opts_ptr } };
 
     // Create inference session (in real implementation, store in runtime)
     let _session = InferenceSession::new(model_handle, prompt, options);

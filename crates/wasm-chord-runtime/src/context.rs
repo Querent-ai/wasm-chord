@@ -1,5 +1,5 @@
-use wasm_chord_core::error::Result;
 use std::collections::HashMap;
+use wasm_chord_core::error::Result;
 
 /// Runtime configuration
 #[derive(Debug, Clone)]
@@ -76,11 +76,7 @@ pub struct RuntimeContext {
 
 impl RuntimeContext {
     pub fn new(config: RuntimeConfig) -> Self {
-        Self {
-            config,
-            models: HashMap::new(),
-            next_id: 1,
-        }
+        Self { config, models: HashMap::new(), next_id: 1 }
     }
 
     pub fn allocate_model_id(&mut self) -> u32 {

@@ -1,4 +1,4 @@
-/// Quantization and dequantization primitives
+//! Quantization and dequantization primitives
 
 use crate::error::{Error, Result};
 use crate::tensor::DataType;
@@ -60,8 +60,8 @@ pub fn dequantize_q8_0(block: &BlockQ8_0, output: &mut [f32]) -> Result<()> {
 
     let scale = block.scale;
 
-    for i in 0..Q8_BLOCK_SIZE {
-        output[i] = block.quants[i] as f32 * scale;
+    for (i, &quant) in block.quants.iter().enumerate().take(Q8_BLOCK_SIZE) {
+        output[i] = quant as f32 * scale;
     }
 
     Ok(())
@@ -98,10 +98,7 @@ mod tests {
 
     #[test]
     fn test_q8_dequant() {
-        let block = BlockQ8_0 {
-            scale: 0.25,
-            quants: [10i8; Q8_BLOCK_SIZE],
-        };
+        let block = BlockQ8_0 { scale: 0.25, quants: [10i8; Q8_BLOCK_SIZE] };
 
         let mut output = [0.0f32; Q8_BLOCK_SIZE];
         dequantize_q8_0(&block, &mut output).unwrap();

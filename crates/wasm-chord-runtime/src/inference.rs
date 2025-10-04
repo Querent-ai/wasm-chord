@@ -1,5 +1,4 @@
 /// Inference session management
-
 use wasm_chord_core::error::Result;
 
 /// Generation options
@@ -42,13 +41,7 @@ pub struct InferenceSession {
 
 impl InferenceSession {
     pub fn new(model_id: u32, prompt: String, options: GenOptions) -> Self {
-        Self {
-            model_id,
-            prompt,
-            options,
-            current_token: 0,
-            generated_tokens: Vec::new(),
-        }
+        Self { model_id, prompt, options, current_token: 0, generated_tokens: Vec::new() }
     }
 
     /// Generate next token (placeholder implementation)

@@ -33,10 +33,7 @@ impl DataType {
     }
 
     pub fn is_quantized(&self) -> bool {
-        matches!(
-            self,
-            DataType::Q4_0 | DataType::Q4_1 | DataType::Q8_0 | DataType::Q8_1
-        )
+        matches!(self, DataType::Q4_0 | DataType::Q4_1 | DataType::Q8_0 | DataType::Q8_1)
     }
 }
 
@@ -66,7 +63,7 @@ impl Shape {
         if self.0.is_empty() {
             return Err(Error::InvalidShape("Shape cannot be empty".into()));
         }
-        if self.0.iter().any(|&d| d == 0) {
+        if self.0.contains(&0) {
             return Err(Error::InvalidShape("Shape dimensions must be > 0".into()));
         }
         Ok(())
@@ -93,12 +90,7 @@ pub struct TensorDesc {
 }
 
 impl TensorDesc {
-    pub fn new(
-        name: String,
-        dtype: DataType,
-        shape: Shape,
-        offset: u64,
-    ) -> Result<Self> {
+    pub fn new(name: String, dtype: DataType, shape: Shape, offset: u64) -> Result<Self> {
         shape.validate()?;
 
         let size_bytes = if dtype.is_quantized() {
@@ -153,6 +145,9 @@ impl Tensor {
     }
 
     /// Get raw data slice
+    ///
+    /// # Safety
+    /// Caller must ensure that data_ptr is valid and points to at least size_bytes of memory.
     pub unsafe fn data_slice(&self) -> &[u8] {
         std::slice::from_raw_parts(self.data_ptr, self.desc.size_bytes)
     }
@@ -186,12 +181,9 @@ mod tests {
 
     #[test]
     fn test_tensor_desc() {
-        let desc = TensorDesc::new(
-            "test.weight".into(),
-            DataType::F32,
-            Shape::new(vec![128, 256]),
-            0,
-        ).unwrap();
+        let desc =
+            TensorDesc::new("test.weight".into(), DataType::F32, Shape::new(vec![128, 256]), 0)
+                .unwrap();
 
         assert_eq!(desc.size_bytes, 128 * 256 * 4);
         assert_eq!(desc.shape.numel(), 128 * 256);

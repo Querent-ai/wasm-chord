@@ -1,6 +1,6 @@
-/// Memory management primitives for wasm-chord
-///
-/// Provides abstractions for multi-memory layout and allocation strategies.
+//! Memory management primitives for wasm-chord
+//!
+//! Provides abstractions for multi-memory layout and allocation strategies.
 
 use crate::error::{Error, Result};
 
@@ -30,11 +30,7 @@ impl BumpAllocator {
     /// # Safety
     /// Caller must ensure base pointer is valid and size is accurate
     pub unsafe fn new(base: *mut u8, size: usize) -> Self {
-        Self {
-            base,
-            size,
-            offset: 0,
-        }
+        Self { base, size, offset: 0 }
     }
 
     /// Allocate aligned bytes
@@ -79,9 +75,7 @@ mod tests {
     #[test]
     fn test_bump_allocator() {
         let mut buffer = vec![0u8; 1024];
-        let mut alloc = unsafe {
-            BumpAllocator::new(buffer.as_mut_ptr(), buffer.len())
-        };
+        let mut alloc = unsafe { BumpAllocator::new(buffer.as_mut_ptr(), buffer.len()) };
 
         // Allocate 16 bytes aligned to 8
         let ptr1 = alloc.alloc(16, 8).unwrap();
@@ -101,9 +95,7 @@ mod tests {
     #[test]
     fn test_oom() {
         let mut buffer = vec![0u8; 64];
-        let mut alloc = unsafe {
-            BumpAllocator::new(buffer.as_mut_ptr(), buffer.len())
-        };
+        let mut alloc = unsafe { BumpAllocator::new(buffer.as_mut_ptr(), buffer.len()) };
 
         // This should fail
         let result = alloc.alloc(128, 1);

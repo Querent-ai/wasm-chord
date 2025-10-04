@@ -12,15 +12,7 @@ fn bench_gemm_small(c: &mut Criterion) {
 
     c.bench_function("gemm_128x128x128", |bencher| {
         bencher.iter(|| {
-            matmul_f32(
-                black_box(&a),
-                black_box(&b),
-                black_box(&mut c),
-                m,
-                k,
-                n,
-            )
-            .unwrap();
+            matmul_f32(black_box(&a), black_box(&b), black_box(&mut c), m, k, n).unwrap();
         });
     });
 }
@@ -36,15 +28,7 @@ fn bench_gemm_medium(c: &mut Criterion) {
 
     c.bench_function("gemm_512x512x512", |bencher| {
         bencher.iter(|| {
-            matmul_f32(
-                black_box(&a),
-                black_box(&b),
-                black_box(&mut c),
-                m,
-                k,
-                n,
-            )
-            .unwrap();
+            matmul_f32(black_box(&a), black_box(&b), black_box(&mut c), m, k, n).unwrap();
         });
     });
 }
