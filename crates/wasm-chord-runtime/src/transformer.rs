@@ -550,6 +550,13 @@ impl Model {
 
         // Load token embeddings
         if let Ok(embedding_data) = tensor_loader.load_tensor("token_embd.weight", parser) {
+            let has_nan = embedding_data.iter().any(|&x| x.is_nan());
+            let has_inf = embedding_data.iter().any(|&x| x.is_infinite());
+            let sum: f32 = embedding_data.iter().take(100).sum();
+            let min = embedding_data.iter().copied().fold(f32::INFINITY, f32::min);
+            let max = embedding_data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            eprintln!("Loaded token_embd.weight: {} elements, nan={}, inf={}, sum100={:.6}, range=[{:.6}, {:.6}]",
+                      embedding_data.len(), has_nan, has_inf, sum, min, max);
             self.token_embeddings.copy_from_slice(embedding_data);
         } else {
             return Err(Error::ParseError("Missing token embeddings".to_string()));
@@ -578,17 +585,65 @@ impl Model {
             let wv_name = format!("blk.{}.attn_v.weight", layer_idx);
             let wo_name = format!("blk.{}.attn_output.weight", layer_idx);
 
+            // Try without .weight suffix if not found
+            let wq_name = if tensor_loader.get_metadata(&wq_name).is_some() {
+                wq_name
+            } else {
+                format!("blk.{}.attn_q", layer_idx)
+            };
+            let wk_name = if tensor_loader.get_metadata(&wk_name).is_some() {
+                wk_name
+            } else {
+                format!("blk.{}.attn_k", layer_idx)
+            };
+            let wv_name = if tensor_loader.get_metadata(&wv_name).is_some() {
+                wv_name
+            } else {
+                format!("blk.{}.attn_v", layer_idx)
+            };
+            let wo_name = if tensor_loader.get_metadata(&wo_name).is_some() {
+                wo_name
+            } else {
+                format!("blk.{}.attn_output", layer_idx)
+            };
+
             if let Ok(wq) = tensor_loader.load_tensor(&wq_name, parser) {
                 layer.attention_weights.wq.copy_from_slice(wq);
+                if layer_idx == 0 {
+                    let has_nan = wq.iter().any(|&x| x.is_nan());
+                    let has_inf = wq.iter().any(|&x| x.is_infinite());
+                    let sum: f32 = wq.iter().take(100).sum();
+                    let min = wq.iter().copied().fold(f32::INFINITY, f32::min);
+                    let max = wq.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                    eprintln!("Loaded {}: {} elements, nan={}, inf={}, sum100={:.6}, range=[{:.6}, {:.6}]",
+                              wq_name, wq.len(), has_nan, has_inf, sum, min, max);
+                }
+            } else if layer_idx == 0 {
+                eprintln!("WARN: Failed to load {}", wq_name);
             }
             if let Ok(wk) = tensor_loader.load_tensor(&wk_name, parser) {
                 layer.attention_weights.wk.copy_from_slice(wk);
+                if layer_idx == 0 {
+                    eprintln!("Loaded {}: {} elements", wk_name, wk.len());
+                }
+            } else if layer_idx == 0 {
+                eprintln!("WARN: Failed to load {}", wk_name);
             }
             if let Ok(wv) = tensor_loader.load_tensor(&wv_name, parser) {
                 layer.attention_weights.wv.copy_from_slice(wv);
+                if layer_idx == 0 {
+                    eprintln!("Loaded {}: {} elements", wv_name, wv.len());
+                }
+            } else if layer_idx == 0 {
+                eprintln!("WARN: Failed to load {}", wv_name);
             }
             if let Ok(wo) = tensor_loader.load_tensor(&wo_name, parser) {
                 layer.attention_weights.wo.copy_from_slice(wo);
+                if layer_idx == 0 {
+                    eprintln!("Loaded {}: {} elements", wo_name, wo.len());
+                }
+            } else if layer_idx == 0 {
+                eprintln!("WARN: Failed to load {}", wo_name);
             }
 
             // Attention norm

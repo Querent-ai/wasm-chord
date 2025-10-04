@@ -158,6 +158,16 @@ impl TensorLoader {
         const BLOCK_SIZE: usize = std::mem::size_of::<BlockQ4_0>();
         let mut result = vec![0.0f32; element_count];
 
+        static FIRST_CALL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+        if FIRST_CALL.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            eprintln!(
+                "Q4_0 dequant: BLOCK_SIZE={}, data.len()={}, element_count={}",
+                BLOCK_SIZE,
+                data.len(),
+                element_count
+            );
+        }
+
         for (block_idx, block_bytes) in data.chunks_exact(BLOCK_SIZE).enumerate() {
             let block: BlockQ4_0 = unsafe { std::ptr::read(block_bytes.as_ptr() as *const _) };
 
@@ -166,6 +176,24 @@ impl TensorLoader {
             let end = (offset + 32).min(result_len);
             if offset < result_len {
                 dequantize_q4_0(&block, &mut result[offset..end])?;
+
+                // Debug first few blocks
+                if block_idx < 3 {
+                    let has_nan = result[offset..end].iter().any(|&x| x.is_nan());
+                    let has_inf = result[offset..end].iter().any(|&x| x.is_infinite());
+                    if has_nan || has_inf {
+                        eprintln!(
+                            "WARNING: Q4_0 block {} produced nan={}, inf={}",
+                            block_idx, has_nan, has_inf
+                        );
+                        eprintln!(
+                            "  Block scale_f16={:.6} (raw={:#x}), quants[0]={:#x}",
+                            half::f16::from_bits(block.scale).to_f32(),
+                            block.scale,
+                            block.quants[0]
+                        );
+                    }
+                }
             }
         }
 
@@ -195,6 +223,17 @@ impl TensorLoader {
         const QK_K: usize = 256;
         let mut result = vec![0.0f32; element_count];
 
+        static FIRST_CALL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+        if FIRST_CALL.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            eprintln!(
+                "Q6_K dequant: BLOCK_SIZE={}, data.len()={}, element_count={}, expected_blocks={}",
+                BLOCK_SIZE,
+                data.len(),
+                element_count,
+                element_count / QK_K
+            );
+        }
+
         for (block_idx, block_bytes) in data.chunks_exact(BLOCK_SIZE).enumerate() {
             let block: BlockQ6_K = unsafe { std::ptr::read(block_bytes.as_ptr() as *const _) };
 
@@ -203,6 +242,25 @@ impl TensorLoader {
             let end = (offset + QK_K).min(result_len);
             if offset < result_len {
                 dequantize_q6_k(&block, &mut result[offset..end])?;
+
+                // Debug first block
+                if block_idx == 0 {
+                    let has_nan = result[offset..end].iter().any(|&x| x.is_nan());
+                    let has_inf = result[offset..end].iter().any(|&x| x.is_infinite());
+                    if has_nan || has_inf {
+                        eprintln!(
+                            "WARNING: First Q6_K block produced nan={}, inf={}",
+                            has_nan, has_inf
+                        );
+                        eprintln!(
+                            "  Block: d={}, scale[0]={}, ql[0]={:#x}, qh[0]={:#x}",
+                            half::f16::from_bits(block.d).to_f32(),
+                            block.scales[0],
+                            block.ql[0],
+                            block.qh[0]
+                        );
+                    }
+                }
             }
         }
 
