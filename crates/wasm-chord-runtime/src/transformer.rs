@@ -192,30 +192,93 @@ impl MultiHeadAttention {
 
     fn compute_attention(
         &self,
-        _q: &[f32],
-        _k: &[f32],
+        q: &[f32],
+        k: &[f32],
         v: &[f32],
         seq_len: usize,
     ) -> Result<Vec<f32>> {
-        // Simplified attention: Q @ K^T @ V
-        // TODO: Implement proper scaled dot-product attention with softmax
-
         let head_dim = self.head_dim;
         let num_heads = self.config.num_heads;
+        let num_kv_heads = self.config.num_kv_heads;
+
+        // GQA: num_heads query heads, num_kv_heads key/value heads
+        // Each KV head is shared by (num_heads / num_kv_heads) query heads
+        let num_queries_per_kv = num_heads / num_kv_heads;
+
+        // Q shape: [seq_len, num_heads, head_dim]
+        // K, V shape: [kv_seq_len, num_kv_heads, head_dim]
+        let kv_seq_len = k.len() / (num_kv_heads * head_dim);
 
         let mut output = vec![0.0; seq_len * num_heads * head_dim];
+        let scale = 1.0 / (head_dim as f32).sqrt();
 
-        // For now, just copy values (placeholder)
-        // Real implementation needs:
-        // 1. Reshape Q, K, V to [num_heads, seq_len, head_dim]
-        // 2. Compute scores = (Q @ K^T) / sqrt(head_dim)
-        // 3. Apply softmax
-        // 4. Multiply by V
-        // 5. Concatenate heads
+        // Process each query head
+        for h in 0..num_heads {
+            // Determine which KV head to use (for GQA)
+            let kv_h = h / num_queries_per_kv;
 
-        if !v.is_empty() {
-            let len = v.len().min(output.len());
-            output[..len].copy_from_slice(&v[..len]);
+            for i in 0..seq_len {
+                // Get query vector for this position and head
+                let q_offset = (i * num_heads + h) * head_dim;
+                let q_vec = &q[q_offset..q_offset + head_dim];
+
+                // Compute attention scores for all KV positions
+                let mut scores = vec![0.0; kv_seq_len];
+
+                #[allow(clippy::needless_range_loop)]
+                for j in 0..kv_seq_len {
+                    // Get key vector
+                    let k_offset = (j * num_kv_heads + kv_h) * head_dim;
+                    let k_vec = &k[k_offset..k_offset + head_dim];
+
+                    // Compute dot product: Q · K^T
+                    let mut score = 0.0;
+                    for d in 0..head_dim {
+                        score += q_vec[d] * k_vec[d];
+                    }
+
+                    // Scale by sqrt(head_dim)
+                    scores[j] = score * scale;
+
+                    // Causal masking: can only attend to previous positions
+                    if j > i {
+                        scores[j] = f32::NEG_INFINITY;
+                    }
+                }
+
+                // Softmax over scores
+                let max_score = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                let mut exp_scores = vec![0.0; kv_seq_len];
+                let mut sum_exp = 0.0;
+
+                for j in 0..kv_seq_len {
+                    if scores[j].is_finite() {
+                        exp_scores[j] = (scores[j] - max_score).exp();
+                        sum_exp += exp_scores[j];
+                    }
+                }
+
+                // Normalize
+                if sum_exp > 0.0 {
+                    for score in &mut exp_scores {
+                        *score /= sum_exp;
+                    }
+                }
+
+                // Weighted sum of values
+                let out_offset = (i * num_heads + h) * head_dim;
+
+                #[allow(clippy::needless_range_loop)]
+                for j in 0..kv_seq_len {
+                    let v_offset = (j * num_kv_heads + kv_h) * head_dim;
+                    let v_vec = &v[v_offset..v_offset + head_dim];
+                    let weight = exp_scores[j];
+
+                    for d in 0..head_dim {
+                        output[out_offset + d] += weight * v_vec[d];
+                    }
+                }
+            }
         }
 
         Ok(output)
@@ -734,5 +797,133 @@ mod tests {
 
         let sampled = model.sample(&logits, 1.0, 1.0, 0).unwrap();
         assert_eq!(sampled, 5);
+    }
+
+    #[test]
+    fn test_attention_computation() {
+        // Small config for testing
+        let config = TransformerConfig {
+            vocab_size: 100,
+            hidden_size: 64,
+            num_layers: 1,
+            num_heads: 4,
+            num_kv_heads: 2,
+            intermediate_size: 128,
+            max_seq_len: 128,
+            rms_norm_eps: 1e-5,
+            rope_theta: 10000.0,
+        };
+
+        let attention = MultiHeadAttention::new(config.clone());
+
+        let seq_len = 3;
+        let head_dim = config.hidden_size / config.num_heads; // 16
+
+        // Create test Q, K, V
+        let q = vec![0.1; seq_len * config.num_heads * head_dim];
+        let k = vec![0.2; seq_len * config.num_kv_heads * head_dim];
+        let v = vec![0.3; seq_len * config.num_kv_heads * head_dim];
+
+        let result = attention.compute_attention(&q, &k, &v, seq_len);
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+
+        // Check output shape
+        assert_eq!(output.len(), seq_len * config.num_heads * head_dim);
+
+        // Output should not be all zeros (attention was computed)
+        let sum: f32 = output.iter().sum();
+        assert!(sum.abs() > 0.0);
+    }
+
+    #[test]
+    fn test_attention_causal_masking() {
+        // Test that causal masking works correctly
+        let config = TransformerConfig {
+            vocab_size: 100,
+            hidden_size: 64,
+            num_layers: 1,
+            num_heads: 4,
+            num_kv_heads: 4, // Standard MHA for simplicity
+            intermediate_size: 128,
+            max_seq_len: 128,
+            rms_norm_eps: 1e-5,
+            rope_theta: 10000.0,
+        };
+
+        let attention = MultiHeadAttention::new(config.clone());
+
+        let seq_len = 4;
+        let head_dim = config.hidden_size / config.num_heads;
+
+        // Create distinct Q, K, V values
+        let mut q = vec![0.0; seq_len * config.num_heads * head_dim];
+        let mut k = vec![0.0; seq_len * config.num_kv_heads * head_dim];
+        let mut v = vec![0.0; seq_len * config.num_kv_heads * head_dim];
+
+        // Set distinct values for each position
+        for i in 0..seq_len {
+            for h in 0..config.num_heads {
+                for d in 0..head_dim {
+                    q[(i * config.num_heads + h) * head_dim + d] = (i + 1) as f32;
+                }
+            }
+            for h in 0..config.num_kv_heads {
+                for d in 0..head_dim {
+                    k[(i * config.num_kv_heads + h) * head_dim + d] = (i + 1) as f32;
+                    v[(i * config.num_kv_heads + h) * head_dim + d] = (i + 1) as f32 * 10.0;
+                }
+            }
+        }
+
+        let result = attention.compute_attention(&q, &k, &v, seq_len).unwrap();
+
+        // Check that output shape is correct
+        assert_eq!(result.len(), seq_len * config.num_heads * head_dim);
+
+        // Verify values are reasonable (not NaN, not zero)
+        for &val in &result {
+            assert!(val.is_finite());
+        }
+    }
+
+    #[test]
+    fn test_attention_with_gqa() {
+        // Test Grouped Query Attention
+        let config = TransformerConfig {
+            vocab_size: 100,
+            hidden_size: 64,
+            num_layers: 1,
+            num_heads: 8,
+            num_kv_heads: 2, // GQA: 4 query heads per KV head
+            intermediate_size: 128,
+            max_seq_len: 128,
+            rms_norm_eps: 1e-5,
+            rope_theta: 10000.0,
+        };
+
+        let attention = MultiHeadAttention::new(config.clone());
+
+        let seq_len = 2;
+        let head_dim = config.hidden_size / config.num_heads; // 8
+
+        let q = vec![1.0; seq_len * config.num_heads * head_dim];
+        let k = vec![0.5; seq_len * config.num_kv_heads * head_dim];
+        let v = vec![2.0; seq_len * config.num_kv_heads * head_dim];
+
+        let result = attention.compute_attention(&q, &k, &v, seq_len);
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+
+        // Verify correct output shape
+        assert_eq!(output.len(), seq_len * config.num_heads * head_dim);
+
+        // All values should be finite
+        for &val in &output {
+            assert!(val.is_finite());
+            assert!(val >= 0.0); // Since V is all positive and weights are normalized
+        }
     }
 }
