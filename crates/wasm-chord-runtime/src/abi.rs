@@ -54,7 +54,10 @@ pub unsafe extern "C" fn wasmchord_init(config_ptr: *const u8, config_len: usize
 /// # Safety
 /// `model_bytes_ptr` must be valid for reads of `model_bytes_len` bytes.
 #[no_mangle]
-pub unsafe extern "C" fn wasmchord_load_model(model_bytes_ptr: *const u8, model_bytes_len: usize) -> u32 {
+pub unsafe extern "C" fn wasmchord_load_model(
+    model_bytes_ptr: *const u8,
+    model_bytes_len: usize,
+) -> u32 {
     if model_bytes_ptr.is_null() || model_bytes_len == 0 {
         set_last_error("Invalid model data pointer".to_string());
         return 0;
