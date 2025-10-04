@@ -46,7 +46,7 @@ impl From<Error> for ErrorCode {
 use std::cell::RefCell;
 
 thread_local! {
-    static LAST_ERROR: RefCell<Option<String>> = RefCell::new(None);
+    static LAST_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 pub(crate) fn set_last_error(msg: String) {

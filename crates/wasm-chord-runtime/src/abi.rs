@@ -15,12 +15,15 @@ static RUNTIME: Mutex<Option<RuntimeContext>> = Mutex::new(None);
 /// Initialize runtime with JSON config
 ///
 /// Returns 0 on success, error code otherwise.
+///
+/// # Safety
+/// `config_ptr` must be valid for reads of `config_len` bytes, or null.
 #[no_mangle]
-pub extern "C" fn wasmchord_init(config_ptr: *const u8, config_len: usize) -> u32 {
+pub unsafe extern "C" fn wasmchord_init(config_ptr: *const u8, config_len: usize) -> u32 {
     let config_str = if config_ptr.is_null() || config_len == 0 {
         "{}" // Default config
     } else {
-        let bytes = unsafe { slice::from_raw_parts(config_ptr, config_len) };
+        let bytes = slice::from_raw_parts(config_ptr, config_len);
         match std::str::from_utf8(bytes) {
             Ok(s) => s,
             Err(e) => {
@@ -47,14 +50,17 @@ pub extern "C" fn wasmchord_init(config_ptr: *const u8, config_len: usize) -> u3
 /// Load model from memory
 ///
 /// Returns model handle (>0) on success, 0 on error.
+///
+/// # Safety
+/// `model_bytes_ptr` must be valid for reads of `model_bytes_len` bytes.
 #[no_mangle]
-pub extern "C" fn wasmchord_load_model(model_bytes_ptr: *const u8, model_bytes_len: usize) -> u32 {
+pub unsafe extern "C" fn wasmchord_load_model(model_bytes_ptr: *const u8, model_bytes_len: usize) -> u32 {
     if model_bytes_ptr.is_null() || model_bytes_len == 0 {
         set_last_error("Invalid model data pointer".to_string());
         return 0;
     }
 
-    let bytes = unsafe { slice::from_raw_parts(model_bytes_ptr, model_bytes_len) };
+    let bytes = slice::from_raw_parts(model_bytes_ptr, model_bytes_len);
 
     // Parse GGUF (simplified - just create placeholder)
     use std::io::Cursor;
@@ -102,8 +108,12 @@ pub extern "C" fn wasmchord_free_model(model_handle: u32) -> u32 {
 /// Perform blocking inference
 ///
 /// Returns stream handle (>0) on success, 0 on error.
+///
+/// # Safety
+/// `prompt_ptr` must be valid for reads of `prompt_len` bytes.
+/// `opts_ptr` must be valid for reads or null.
 #[no_mangle]
-pub extern "C" fn wasmchord_infer(
+pub unsafe extern "C" fn wasmchord_infer(
     model_handle: u32,
     prompt_ptr: *const u8,
     prompt_len: usize,
@@ -114,7 +124,7 @@ pub extern "C" fn wasmchord_infer(
         return 0;
     }
 
-    let prompt_bytes = unsafe { slice::from_raw_parts(prompt_ptr, prompt_len) };
+    let prompt_bytes = slice::from_raw_parts(prompt_ptr, prompt_len);
     let prompt = match std::str::from_utf8(prompt_bytes) {
         Ok(s) => s.to_string(),
         Err(e) => {
@@ -123,7 +133,7 @@ pub extern "C" fn wasmchord_infer(
         }
     };
 
-    let options = if opts_ptr.is_null() { GenOptions::default() } else { unsafe { *opts_ptr } };
+    let options = if opts_ptr.is_null() { GenOptions::default() } else { *opts_ptr };
 
     // Create inference session (in real implementation, store in runtime)
     let _session = InferenceSession::new(model_handle, prompt, options);
@@ -136,8 +146,11 @@ pub extern "C" fn wasmchord_infer(
 /// Get next token from stream
 ///
 /// Returns number of bytes written, -1 for end, -2 for error.
+///
+/// # Safety
+/// `buf_ptr` must be valid for writes of `buf_len` bytes.
 #[no_mangle]
-pub extern "C" fn wasmchord_next_token(
+pub unsafe extern "C" fn wasmchord_next_token(
     stream_handle: u32,
     buf_ptr: *mut u8,
     buf_len: usize,
@@ -162,9 +175,7 @@ pub extern "C" fn wasmchord_next_token(
         return -2;
     }
 
-    unsafe {
-        std::ptr::copy_nonoverlapping(token_bytes.as_ptr(), buf_ptr, token_bytes.len());
-    }
+    std::ptr::copy_nonoverlapping(token_bytes.as_ptr(), buf_ptr, token_bytes.len());
 
     token_bytes.len() as i32
 }
@@ -184,8 +195,11 @@ pub extern "C" fn wasmchord_close_stream(stream_handle: u32) -> u32 {
 /// Get last error message
 ///
 /// Returns number of bytes written to buffer.
+///
+/// # Safety
+/// `buf_ptr` must be valid for writes of `buf_len` bytes.
 #[no_mangle]
-pub extern "C" fn wasmchord_last_error(buf_ptr: *mut c_char, buf_len: usize) -> usize {
+pub unsafe extern "C" fn wasmchord_last_error(buf_ptr: *mut c_char, buf_len: usize) -> usize {
     if buf_ptr.is_null() || buf_len == 0 {
         return 0;
     }
@@ -194,10 +208,8 @@ pub extern "C" fn wasmchord_last_error(buf_ptr: *mut c_char, buf_len: usize) -> 
     let bytes = error_msg.as_bytes();
     let copy_len = bytes.len().min(buf_len - 1); // Leave room for null terminator
 
-    unsafe {
-        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf_ptr as *mut u8, copy_len);
-        *buf_ptr.add(copy_len) = 0; // Null terminator
-    }
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf_ptr as *mut u8, copy_len);
+    *buf_ptr.add(copy_len) = 0; // Null terminator
 
     copy_len
 }
@@ -215,7 +227,7 @@ mod tests {
     #[test]
     fn test_init() {
         let config = b"{}";
-        let result = wasmchord_init(config.as_ptr(), config.len());
+        let result = unsafe { wasmchord_init(config.as_ptr(), config.len()) };
         assert_eq!(result, ErrorCode::Ok as u32);
     }
 

@@ -38,11 +38,9 @@ impl GpuBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_placeholder() {
-        // Placeholder test
-        assert!(true);
+        // Placeholder test - GPU backend requires async runtime
+        // Real tests will be added in Phase 2
     }
 }

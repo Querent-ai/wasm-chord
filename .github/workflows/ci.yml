@@ -73,7 +73,7 @@ jobs:
       - name: Build with wasm-pack
         run: |
           cd crates/wasm-chord-runtime
-          wasm-pack build --target web
+          WASM_OPT_FLAGS="--enable-bulk-memory" wasm-pack build --target web
 
       - name: Upload wasm artifacts
         uses: actions/upload-artifact@v4
