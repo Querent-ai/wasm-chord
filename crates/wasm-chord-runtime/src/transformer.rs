@@ -523,11 +523,11 @@ impl Model {
     /// Forward pass through the model
     ///
     /// # Arguments
-    /// * `token_ids` - Input token IDs [seq_len]
+    /// * `token_ids` - Input token IDs \[seq_len\]
     /// * `position` - Current position in sequence (for KV cache)
     ///
     /// # Returns
-    /// Logits [seq_len, vocab_size]
+    /// Logits \[seq_len, vocab_size\]
     pub fn forward(&mut self, token_ids: &[u32], position: usize) -> Result<Vec<f32>> {
         let seq_len = token_ids.len();
         let hidden_size = self.config.hidden_size;
@@ -567,7 +567,7 @@ impl Model {
     /// Sample next token from logits
     ///
     /// # Arguments
-    /// * `logits` - Logits for last position [vocab_size]
+    /// * `logits` - Logits for last position \[vocab_size\]
     /// * `temperature` - Sampling temperature (default 1.0)
     /// * `top_p` - Nucleus sampling threshold (default 1.0 = disabled)
     /// * `top_k` - Top-k sampling (default 0 = disabled)
