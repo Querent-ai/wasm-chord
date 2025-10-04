@@ -75,11 +75,3 @@ fn test_sampling() {
 
     println!("✅ Sampling works: selected token {}", sample);
 }
-
-#[test]
-fn test_integration_ready() {
-    // This confirms integration test infrastructure is ready
-    // Real model loading tests will be added when we have test data
-    println!("✅ Integration test infrastructure ready for real model tests");
-    assert!(true);
-}
