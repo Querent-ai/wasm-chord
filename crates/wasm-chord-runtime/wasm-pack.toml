@@ -1,0 +1,5 @@
+[package]
+name = "wasm-chord-runtime"
+
+[profile.release.wasm-bindgen]
+wasm-opt = ["-O3", "--enable-bulk-memory", "--skip-validation"]
