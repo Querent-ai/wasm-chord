@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// Tensor data type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
 pub enum DataType {
     F32,
     F16,
@@ -15,9 +16,25 @@ pub enum DataType {
     /// 4-bit quantized (group-wise)
     Q4_0,
     Q4_1,
+    /// 5-bit quantized
+    Q5_0,
+    Q5_1,
     /// 8-bit quantized (group-wise)
     Q8_0,
     Q8_1,
+    /// 2-bit quantized
+    Q2_K,
+    /// 3-bit quantized
+    Q3_K,
+    /// 4-bit quantized (K-quant)
+    Q4_K,
+    /// 5-bit quantized (K-quant)
+    Q5_K,
+    /// 6-bit quantized (K-quant)
+    Q6_K,
+    /// Other quantization types (we'll handle them as unsupported for now)
+    #[allow(dead_code)]
+    Unsupported,
 }
 
 impl DataType {
@@ -27,13 +44,29 @@ impl DataType {
             DataType::F32 | DataType::I32 | DataType::U32 => 4,
             DataType::F16 | DataType::I16 | DataType::U16 => 2,
             DataType::I8 | DataType::U8 => 1,
-            DataType::Q4_0 | DataType::Q4_1 => 0, // Variable, handled separately
+            // Quantized types have variable size, handled separately
+            DataType::Q4_0 | DataType::Q4_1 | DataType::Q5_0 | DataType::Q5_1 => 0,
             DataType::Q8_0 | DataType::Q8_1 => 1,
+            DataType::Q2_K | DataType::Q3_K | DataType::Q4_K | DataType::Q5_K | DataType::Q6_K => 0,
+            DataType::Unsupported => 0,
         }
     }
 
     pub fn is_quantized(&self) -> bool {
-        matches!(self, DataType::Q4_0 | DataType::Q4_1 | DataType::Q8_0 | DataType::Q8_1)
+        matches!(
+            self,
+            DataType::Q4_0
+                | DataType::Q4_1
+                | DataType::Q5_0
+                | DataType::Q5_1
+                | DataType::Q8_0
+                | DataType::Q8_1
+                | DataType::Q2_K
+                | DataType::Q3_K
+                | DataType::Q4_K
+                | DataType::Q5_K
+                | DataType::Q6_K
+        )
     }
 }
 

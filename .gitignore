@@ -39,3 +39,4 @@ build/
 # Environment
 .env
 .env.local
+models/

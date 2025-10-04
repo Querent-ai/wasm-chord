@@ -443,9 +443,20 @@ impl<R: Read + Seek> GGUFParser<R> {
             1 => Ok(DataType::F16),
             2 => Ok(DataType::Q4_0),
             3 => Ok(DataType::Q4_1),
+            6 => Ok(DataType::Q5_0),
+            7 => Ok(DataType::Q5_1),
             8 => Ok(DataType::Q8_0),
             9 => Ok(DataType::Q8_1),
-            _ => Err(Error::UnsupportedDataType(format!("Unknown dtype: {}", val))),
+            10 => Ok(DataType::Q2_K),
+            11 => Ok(DataType::Q3_K),
+            12 => Ok(DataType::Q4_K),
+            13 => Ok(DataType::Q5_K),
+            14 => Ok(DataType::Q6_K),
+            // Unknown types are treated as unsupported but don't fail parsing
+            _ => {
+                eprintln!("Warning: Unsupported dtype: {}, treating as Unsupported", val);
+                Ok(DataType::Unsupported)
+            }
         }
     }
 }

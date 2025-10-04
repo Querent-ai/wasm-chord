@@ -36,3 +36,10 @@ pub struct TransformerConfigData {
     pub rms_norm_eps: f32,
     pub rope_theta: f32,
 }
+
+impl TransformerConfigData {
+    /// Convert to runtime TransformerConfig (requires runtime crate to import)
+    pub fn to_config(&self) -> Self {
+        self.clone()
+    }
+}

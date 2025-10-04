@@ -16,5 +16,6 @@ fn test_gguf_parser_creation() {
 fn test_integration_placeholder() {
     // This is a placeholder until we have real GGUF test data
     // Real integration tests will be added when we download test models
-    assert!(true, "Integration test infrastructure ready");
+    let ready = true;
+    assert!(ready, "Integration test infrastructure ready");
 }

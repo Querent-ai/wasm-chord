@@ -45,6 +45,22 @@ impl Default for TransformerConfig {
     }
 }
 
+impl From<wasm_chord_core::TransformerConfigData> for TransformerConfig {
+    fn from(data: wasm_chord_core::TransformerConfigData) -> Self {
+        Self {
+            vocab_size: data.vocab_size,
+            hidden_size: data.hidden_size,
+            num_layers: data.num_layers,
+            num_heads: data.num_heads,
+            num_kv_heads: data.num_kv_heads,
+            intermediate_size: data.intermediate_size,
+            max_seq_len: data.max_seq_len,
+            rms_norm_eps: data.rms_norm_eps,
+            rope_theta: data.rope_theta,
+        }
+    }
+}
+
 /// KV cache for a single layer
 #[derive(Debug, Clone)]
 #[allow(dead_code)]

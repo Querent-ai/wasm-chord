@@ -4,7 +4,9 @@
 
 use crate::error::{Error, Result};
 use crate::formats::gguf::GGUFParser;
-use crate::quant::{dequantize_q4_0, dequantize_q8_0, BlockQ4_0, BlockQ8_0};
+use crate::quant::{
+    dequantize_q4_0, dequantize_q6_k, dequantize_q8_0, BlockQ4_0, BlockQ6_K, BlockQ8_0,
+};
 use crate::tensor::{DataType, TensorDesc};
 use std::collections::HashMap;
 use std::io::{Read, Seek};
@@ -94,6 +96,10 @@ impl TensorLoader {
                 // Dequantize Q8_0
                 self.dequantize_q8_0(&raw_data, metadata.desc.element_count())?
             }
+            DataType::Q6_K => {
+                // Dequantize Q6_K
+                self.dequantize_q6_k(&raw_data, metadata.desc.element_count())?
+            }
             _ => {
                 return Err(Error::UnsupportedDataType(format!(
                     "Unsupported dtype for loading: {:?}",
@@ -178,6 +184,25 @@ impl TensorLoader {
             let end = (offset + 32).min(result_len);
             if offset < result_len {
                 dequantize_q8_0(&block, &mut result[offset..end])?;
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn dequantize_q6_k(&self, data: &[u8], element_count: usize) -> Result<Vec<f32>> {
+        const BLOCK_SIZE: usize = std::mem::size_of::<BlockQ6_K>();
+        const QK_K: usize = 256;
+        let mut result = vec![0.0f32; element_count];
+
+        for (block_idx, block_bytes) in data.chunks_exact(BLOCK_SIZE).enumerate() {
+            let block: BlockQ6_K = unsafe { std::ptr::read(block_bytes.as_ptr() as *const _) };
+
+            let offset = block_idx * QK_K;
+            let result_len = result.len();
+            let end = (offset + QK_K).min(result_len);
+            if offset < result_len {
+                dequantize_q6_k(&block, &mut result[offset..end])?;
             }
         }
 
