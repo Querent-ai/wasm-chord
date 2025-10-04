@@ -1,0 +1,75 @@
+{
+  "version": "1.0",
+  "description": "Performance regression baselines for wasm-chord",
+  "updated": "2025-10-04",
+  "thresholds": {
+    "cpu_matmul": {
+      "gemm_128x128x128": {
+        "max_time_us": 300,
+        "description": "Small matrix multiplication (128³)"
+      },
+      "gemm_512x512x512": {
+        "max_time_ms": 100,
+        "description": "Medium matrix multiplication (512³)"
+      },
+      "transformer_qkv_projection": {
+        "max_time_us": 1500,
+        "description": "Q+K+V projection (1×2048×6144)"
+      },
+      "transformer_lm_head": {
+        "max_time_ms": 8,
+        "description": "LM head projection (1×2048×32000)"
+      },
+      "transposed_matmul_1x2048x2048": {
+        "max_time_us": 1000,
+        "description": "Transposed matmul for attention"
+      }
+    },
+    "runtime_attention": {
+      "attention_seq_1": {
+        "max_time_us": 50,
+        "description": "Single token attention"
+      },
+      "attention_seq_64": {
+        "max_time_ms": 5,
+        "description": "Attention with seq_len=64"
+      },
+      "attention_seq_128": {
+        "max_time_ms": 15,
+        "description": "Attention with seq_len=128"
+      },
+      "attention_seq_256": {
+        "max_time_ms": 50,
+        "description": "Attention with seq_len=256"
+      },
+      "gqa_32_to_1": {
+        "max_time_ms": 5,
+        "description": "Multi-query attention (32:1 ratio)"
+      },
+      "dot_product_64": {
+        "max_time_ns": 100,
+        "description": "Optimized dot product (64-dim)"
+      }
+    },
+    "integration": {
+      "gguf_parsing": {
+        "max_time_us": 100,
+        "description": "Parse minimal GGUF file"
+      },
+      "forward_pass_tiny": {
+        "max_time_us": 1000,
+        "description": "Forward pass on tiny model (256 vocab)"
+      },
+      "sampling": {
+        "max_time_us": 50,
+        "description": "Sample next token with temperature/top-p/top-k"
+      }
+    }
+  },
+  "notes": [
+    "Thresholds are set at 2x typical values to allow for CI variance",
+    "Times measured on Ubuntu CI runners (2-core, 7GB RAM)",
+    "PRs that exceed these thresholds will be flagged for review",
+    "Thresholds should be updated when performance improvements are made"
+  ]
+}
