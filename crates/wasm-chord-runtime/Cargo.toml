@@ -7,6 +7,9 @@ repository.workspace = true
 authors.workspace = true
 description = "WebAssembly runtime with C ABI for wasm-chord"
 
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O3", "--enable-bulk-memory", "--skip-validation"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
