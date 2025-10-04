@@ -128,7 +128,7 @@ pub unsafe extern "C" fn wasmchord_infer(
     }
 
     let prompt_bytes = slice::from_raw_parts(prompt_ptr, prompt_len);
-    let prompt = match std::str::from_utf8(prompt_bytes) {
+    let _prompt = match std::str::from_utf8(prompt_bytes) {
         Ok(s) => s.to_string(),
         Err(e) => {
             set_last_error(format!("Invalid UTF-8 in prompt: {}", e));
@@ -138,8 +138,12 @@ pub unsafe extern "C" fn wasmchord_infer(
 
     let options = if opts_ptr.is_null() { GenOptions::default() } else { *opts_ptr };
 
+    // TODO: Tokenize prompt (_prompt) before creating session
+    // For now, use empty token vector as placeholder
+    let prompt_tokens = Vec::new(); // Will be tokenized in full implementation
+
     // Create inference session (in real implementation, store in runtime)
-    let _session = InferenceSession::new(model_handle, prompt, options);
+    let _session = InferenceSession::new(model_handle, prompt_tokens, options);
 
     // Placeholder: return dummy stream handle
     // In real implementation, we'd store session and return its ID
