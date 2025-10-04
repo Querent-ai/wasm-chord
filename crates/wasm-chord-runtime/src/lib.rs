@@ -5,6 +5,7 @@
 mod abi;
 mod context;
 mod inference;
+mod transformer;
 
 pub use abi::*;
 pub use context::RuntimeContext;
