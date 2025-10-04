@@ -1,0 +1,33 @@
+{
+  "name": "@querent/wasm-chord",
+  "version": "0.1.0",
+  "description": "WebAssembly runtime for LLM inference - JavaScript bindings",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "wasm-pack build ../../crates/wasm-chord-runtime --target web --out-dir ../../bindings/js/pkg",
+    "build:node": "wasm-pack build ../../crates/wasm-chord-runtime --target nodejs --out-dir ../../bindings/js/pkg-node",
+    "test": "echo \"Tests not yet implemented\""
+  },
+  "keywords": [
+    "wasm",
+    "webassembly",
+    "llm",
+    "inference",
+    "ai",
+    "machine-learning"
+  ],
+  "author": "Querent AI <team@querent.xyz>",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/querent-ai/wasm-chord"
+  },
+  "files": [
+    "dist/",
+    "pkg/"
+  ],
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}

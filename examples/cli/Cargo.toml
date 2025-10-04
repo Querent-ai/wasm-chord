@@ -1,0 +1,15 @@
+[package]
+name = "wasm-chord-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "wasm-chord"
+path = "src/main.rs"
+
+[dependencies]
+wasm-chord-core = { workspace = true }
+wasm-chord-runtime = { workspace = true }
+wasm-chord-cpu = { workspace = true }
+anyhow = { workspace = true }
