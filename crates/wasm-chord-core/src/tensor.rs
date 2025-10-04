@@ -110,6 +110,11 @@ impl TensorDesc {
             quant_meta: None,
         })
     }
+
+    /// Get total number of elements in the tensor
+    pub fn element_count(&self) -> usize {
+        self.shape.numel()
+    }
 }
 
 /// Tensor memory layout
