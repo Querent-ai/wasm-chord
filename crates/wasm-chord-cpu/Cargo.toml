@@ -1,0 +1,21 @@
+[package]
+name = "wasm-chord-cpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "CPU backend with SIMD kernels for wasm-chord"
+
+[dependencies]
+wasm-chord-core = { workspace = true }
+bytemuck = { workspace = true }
+rayon = { workspace = true }
+ndarray = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "gemm"
+harness = false
