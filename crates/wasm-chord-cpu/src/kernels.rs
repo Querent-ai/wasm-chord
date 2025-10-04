@@ -39,7 +39,7 @@ pub fn relu(input: &[f32], output: &mut [f32]) -> Result<()> {
 pub fn gelu(input: &[f32], output: &mut [f32]) -> Result<()> {
     assert_eq!(input.len(), output.len());
 
-    const SQRT_2_OVER_PI: f32 = 0.797_884_608;
+    const SQRT_2_OVER_PI: f32 = 0.797_884_6;
     const COEFF: f32 = 0.044_715;
 
     for (i, &x) in input.iter().enumerate() {

@@ -2,10 +2,12 @@
 ///
 /// Provides stable FFI interface for host languages.
 use crate::{context::*, inference::*, set_last_error, take_last_error, ErrorCode};
-use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::slice;
 use std::sync::Mutex;
+
+#[cfg(test)]
+use std::ffi::CStr;
 
 // Global runtime context (protected by mutex for thread safety)
 static RUNTIME: Mutex<Option<RuntimeContext>> = Mutex::new(None);

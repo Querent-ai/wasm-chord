@@ -13,7 +13,7 @@ pub struct RuntimeConfig {
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
-            max_memory_bytes: 8_589_934_592, // 8 GB (avoids overflow on 32-bit)
+            max_memory_bytes: 4_294_967_295, // ~4 GB (max for 32-bit usize)
             deterministic: false,
             gpu_enabled: true,
             num_threads: 0, // auto-detect
@@ -59,7 +59,7 @@ impl<'de> serde::Deserialize<'de> for RuntimeConfig {
 
         let helper = ConfigHelper::deserialize(deserializer)?;
         Ok(Self {
-            max_memory_bytes: helper.max_memory_bytes.unwrap_or(8_589_934_592),
+            max_memory_bytes: helper.max_memory_bytes.unwrap_or(4_294_967_295),
             deterministic: helper.deterministic.unwrap_or(false),
             gpu_enabled: helper.gpu_enabled.unwrap_or(true),
             num_threads: helper.num_threads.unwrap_or(0),
