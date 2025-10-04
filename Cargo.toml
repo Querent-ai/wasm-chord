@@ -1,0 +1,76 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/wasm-chord-core",
+    "crates/wasm-chord-runtime",
+    "crates/wasm-chord-gpu",
+    "crates/wasm-chord-cpu",
+    "examples/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/querent-ai/wasm-chord"
+authors = ["Querent AI <team@querent.xyz>"]
+
+[workspace.dependencies]
+# Internal crates
+wasm-chord-core = { path = "crates/wasm-chord-core" }
+wasm-chord-runtime = { path = "crates/wasm-chord-runtime" }
+wasm-chord-gpu = { path = "crates/wasm-chord-gpu" }
+wasm-chord-cpu = { path = "crates/wasm-chord-cpu" }
+
+# Core dependencies
+bytemuck = { version = "1.14", features = ["derive"] }
+half = "2.3"
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+
+# Wasm-specific
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "console",
+    "Window",
+    "Document",
+    "Performance",
+] }
+
+# GPU
+wgpu = { version = "0.19", default-features = false }
+
+# Async
+futures = "0.3"
+tokio = { version = "1.35", features = ["full"] }
+
+# Math
+ndarray = { version = "0.15", features = ["rayon"] }
+rayon = "1.8"
+
+# Testing
+criterion = "0.5"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+# Optimized for Wasm size
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
