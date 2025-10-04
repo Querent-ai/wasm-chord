@@ -34,13 +34,28 @@ pub fn matmul_f32(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: us
     // Zero output
     c.fill(0.0);
 
-    // Naive triple loop (can be optimized with blocking/SIMD later)
+    // Optimized with loop unrolling and better memory access
     for i in 0..m {
+        let a_row = &a[i * k..(i + 1) * k];
+
         for j in 0..n {
             let mut sum = 0.0;
-            for l in 0..k {
-                sum += a[i * k + l] * b[l * n + j];
+            let chunks = k / 4;
+
+            // Process 4 elements at a time (loop unrolling)
+            for l in 0..chunks {
+                let idx = l * 4;
+                sum += a_row[idx] * b[idx * n + j];
+                sum += a_row[idx + 1] * b[(idx + 1) * n + j];
+                sum += a_row[idx + 2] * b[(idx + 2) * n + j];
+                sum += a_row[idx + 3] * b[(idx + 3) * n + j];
             }
+
+            // Handle remainder
+            for l in (chunks * 4)..k {
+                sum += a_row[l] * b[l * n + j];
+            }
+
             c[i * n + j] = sum;
         }
     }
@@ -87,13 +102,29 @@ pub fn matmul_transposed(
 
     c.fill(0.0);
 
+    // Optimized: both A and B^T are accessed row-wise (cache-friendly)
     for i in 0..m {
+        let a_row = &a[i * k..(i + 1) * k];
+
         for j in 0..n {
+            let b_row = &b_t[j * k..(j + 1) * k];
             let mut sum = 0.0;
-            for l in 0..k {
-                // B is stored as [N, K], so B^T[j, l] = B[j * k + l]
-                sum += a[i * k + l] * b_t[j * k + l];
+            let chunks = k / 4;
+
+            // Process 4 elements at a time (loop unrolling)
+            for l in 0..chunks {
+                let idx = l * 4;
+                sum += a_row[idx] * b_row[idx];
+                sum += a_row[idx + 1] * b_row[idx + 1];
+                sum += a_row[idx + 2] * b_row[idx + 2];
+                sum += a_row[idx + 3] * b_row[idx + 3];
             }
+
+            // Handle remainder
+            for l in (chunks * 4)..k {
+                sum += a_row[l] * b_row[l];
+            }
+
             c[i * n + j] = sum;
         }
     }

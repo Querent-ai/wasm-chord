@@ -3,15 +3,90 @@
 /// Specification: https://github.com/ggerganov/ggml/blob/master/docs/gguf.md
 use crate::error::{Error, Result};
 use crate::tensor::{DataType, Shape, TensorDesc};
-use serde::{Deserialize, Serialize};
 use std::io::{Read, Seek, SeekFrom};
 
 /// GGUF magic number (version 3)
 const GGUF_MAGIC: u32 = 0x46554747; // "GGUF"
 const GGUF_VERSION: u32 = 3;
 
+/// GGUF metadata value types
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+enum GGUFValueType {
+    UInt8 = 0,
+    Int8 = 1,
+    UInt16 = 2,
+    Int16 = 3,
+    UInt32 = 4,
+    Int32 = 5,
+    Float32 = 6,
+    Bool = 7,
+    String = 8,
+    Array = 9,
+    UInt64 = 10,
+    Int64 = 11,
+    Float64 = 12,
+}
+
+/// Metadata value
+#[derive(Debug, Clone)]
+pub enum MetadataValue {
+    UInt8(u8),
+    Int8(i8),
+    UInt16(u16),
+    Int16(i16),
+    UInt32(u32),
+    Int32(i32),
+    UInt64(u64),
+    Int64(i64),
+    Float32(f32),
+    Float64(f64),
+    Bool(bool),
+    String(String),
+    Array(Vec<MetadataValue>),
+}
+
+impl MetadataValue {
+    pub fn as_u32(&self) -> Option<u32> {
+        match self {
+            MetadataValue::UInt8(v) => Some(*v as u32),
+            MetadataValue::UInt16(v) => Some(*v as u32),
+            MetadataValue::UInt32(v) => Some(*v),
+            MetadataValue::UInt64(v) => Some(*v as u32),
+            MetadataValue::Int8(v) => Some(*v as u32),
+            MetadataValue::Int16(v) => Some(*v as u32),
+            MetadataValue::Int32(v) => Some(*v as u32),
+            MetadataValue::Int64(v) => Some(*v as u32),
+            _ => None,
+        }
+    }
+
+    pub fn as_f32(&self) -> Option<f32> {
+        match self {
+            MetadataValue::Float32(v) => Some(*v),
+            MetadataValue::Float64(v) => Some(*v as f32),
+            _ => None,
+        }
+    }
+
+    pub fn as_string(&self) -> Option<&str> {
+        match self {
+            MetadataValue::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn as_array(&self) -> Option<&[MetadataValue]> {
+        match self {
+            MetadataValue::Array(arr) => Some(arr),
+            _ => None,
+        }
+    }
+}
+
 /// Model metadata extracted from GGUF header
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ModelMeta {
     pub version: u32,
     pub tensor_count: u64,
@@ -19,6 +94,7 @@ pub struct ModelMeta {
     pub architecture: String,
     pub vocab_size: Option<u32>,
     pub tensors: Vec<TensorDesc>,
+    pub metadata: std::collections::HashMap<String, MetadataValue>,
 }
 
 /// GGUF streaming parser
@@ -57,16 +133,26 @@ impl<R: Read + Seek> GGUFParser<R> {
         // Parse tensor info
         let tensors = self.parse_tensor_info(tensor_count)?;
 
+        // Extract commonly used fields
+        let architecture = metadata
+            .get("general.architecture")
+            .and_then(|v| v.as_string())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let vocab_size = metadata
+            .get(&format!("{}.vocab_size", architecture))
+            .or_else(|| metadata.get("vocab_size"))
+            .and_then(|v| v.as_u32());
+
         let meta = ModelMeta {
             version,
             tensor_count,
             metadata_kv_count,
-            architecture: metadata
-                .get("general.architecture")
-                .cloned()
-                .unwrap_or_else(|| "unknown".to_string()),
-            vocab_size: metadata.get("vocab_size").and_then(|v| v.parse().ok()),
+            architecture,
+            vocab_size,
             tensors,
+            metadata,
         };
 
         self.meta = Some(meta.clone());
@@ -111,6 +197,77 @@ impl<R: Read + Seek> GGUFParser<R> {
         self.meta.as_ref()
     }
 
+    /// Extract transformer config from metadata
+    pub fn extract_config(&self) -> Option<crate::TransformerConfigData> {
+        let meta = self.meta.as_ref()?;
+        let arch = &meta.architecture;
+
+        Some(crate::TransformerConfigData {
+            vocab_size: meta
+                .metadata
+                .get(&format!("{}.vocab_size", arch))
+                .or_else(|| meta.metadata.get("vocab_size"))
+                .and_then(|v| v.as_u32())
+                .unwrap_or(32000) as usize,
+
+            hidden_size: meta
+                .metadata
+                .get(&format!("{}.embedding_length", arch))
+                .or_else(|| meta.metadata.get(&format!("{}.hidden_size", arch)))
+                .and_then(|v| v.as_u32())
+                .unwrap_or(2048) as usize,
+
+            num_layers: meta
+                .metadata
+                .get(&format!("{}.block_count", arch))
+                .or_else(|| meta.metadata.get(&format!("{}.num_layers", arch)))
+                .and_then(|v| v.as_u32())
+                .unwrap_or(22) as usize,
+
+            num_heads: meta
+                .metadata
+                .get(&format!("{}.attention.head_count", arch))
+                .or_else(|| meta.metadata.get(&format!("{}.num_heads", arch)))
+                .and_then(|v| v.as_u32())
+                .unwrap_or(32) as usize,
+
+            num_kv_heads: meta
+                .metadata
+                .get(&format!("{}.attention.head_count_kv", arch))
+                .or_else(|| meta.metadata.get(&format!("{}.num_kv_heads", arch)))
+                .and_then(|v| v.as_u32())
+                .unwrap_or(4) as usize,
+
+            intermediate_size: meta
+                .metadata
+                .get(&format!("{}.feed_forward_length", arch))
+                .or_else(|| meta.metadata.get(&format!("{}.intermediate_size", arch)))
+                .and_then(|v| v.as_u32())
+                .unwrap_or(5632) as usize,
+
+            max_seq_len: meta
+                .metadata
+                .get(&format!("{}.context_length", arch))
+                .or_else(|| meta.metadata.get(&format!("{}.max_seq_len", arch)))
+                .and_then(|v| v.as_u32())
+                .unwrap_or(2048) as usize,
+
+            rms_norm_eps: meta
+                .metadata
+                .get(&format!("{}.attention.layer_norm_rms_epsilon", arch))
+                .or_else(|| meta.metadata.get("rms_norm_eps"))
+                .and_then(|v| v.as_f32())
+                .unwrap_or(1e-5),
+
+            rope_theta: meta
+                .metadata
+                .get(&format!("{}.rope.freq_base", arch))
+                .or_else(|| meta.metadata.get("rope_theta"))
+                .and_then(|v| v.as_f32())
+                .unwrap_or(10000.0),
+        })
+    }
+
     // Helper methods
 
     fn read_u32(&mut self) -> Result<u32> {
@@ -132,24 +289,119 @@ impl<R: Read + Seek> GGUFParser<R> {
         String::from_utf8(buf).map_err(|e| Error::ParseError(format!("Invalid UTF-8: {}", e)))
     }
 
-    fn parse_metadata(&mut self, count: u64) -> Result<std::collections::HashMap<String, String>> {
+    fn read_i8(&mut self) -> Result<i8> {
+        let mut buf = [0u8; 1];
+        self.reader.read_exact(&mut buf)?;
+        Ok(i8::from_le_bytes(buf))
+    }
+
+    fn read_u8(&mut self) -> Result<u8> {
+        let mut buf = [0u8; 1];
+        self.reader.read_exact(&mut buf)?;
+        Ok(buf[0])
+    }
+
+    fn read_u16(&mut self) -> Result<u16> {
+        let mut buf = [0u8; 2];
+        self.reader.read_exact(&mut buf)?;
+        Ok(u16::from_le_bytes(buf))
+    }
+
+    fn read_i16(&mut self) -> Result<i16> {
+        let mut buf = [0u8; 2];
+        self.reader.read_exact(&mut buf)?;
+        Ok(i16::from_le_bytes(buf))
+    }
+
+    fn read_i32(&mut self) -> Result<i32> {
+        let mut buf = [0u8; 4];
+        self.reader.read_exact(&mut buf)?;
+        Ok(i32::from_le_bytes(buf))
+    }
+
+    fn read_i64(&mut self) -> Result<i64> {
+        let mut buf = [0u8; 8];
+        self.reader.read_exact(&mut buf)?;
+        Ok(i64::from_le_bytes(buf))
+    }
+
+    fn read_f32(&mut self) -> Result<f32> {
+        let mut buf = [0u8; 4];
+        self.reader.read_exact(&mut buf)?;
+        Ok(f32::from_le_bytes(buf))
+    }
+
+    fn read_f64(&mut self) -> Result<f64> {
+        let mut buf = [0u8; 8];
+        self.reader.read_exact(&mut buf)?;
+        Ok(f64::from_le_bytes(buf))
+    }
+
+    fn parse_metadata(
+        &mut self,
+        count: u64,
+    ) -> Result<std::collections::HashMap<String, MetadataValue>> {
         let mut map = std::collections::HashMap::new();
 
         for _ in 0..count {
             let key = self.read_string()?;
-
-            // Read value type (simplified - assume string for now)
-            let value_type = self.read_u32()?;
-
-            // For simplicity, skip actual value parsing
-            // In production, we'd properly parse based on value_type
-            let _ = value_type;
-
-            // Placeholder
-            map.insert(key, "placeholder".to_string());
+            let value = self.read_metadata_value()?;
+            map.insert(key, value);
         }
 
         Ok(map)
+    }
+
+    fn read_metadata_value(&mut self) -> Result<MetadataValue> {
+        let value_type = self.read_u32()?;
+
+        match value_type {
+            0 => Ok(MetadataValue::UInt8(self.read_u8()?)),
+            1 => Ok(MetadataValue::Int8(self.read_i8()?)),
+            2 => Ok(MetadataValue::UInt16(self.read_u16()?)),
+            3 => Ok(MetadataValue::Int16(self.read_i16()?)),
+            4 => Ok(MetadataValue::UInt32(self.read_u32()?)),
+            5 => Ok(MetadataValue::Int32(self.read_i32()?)),
+            6 => Ok(MetadataValue::Float32(self.read_f32()?)),
+            7 => Ok(MetadataValue::Bool(self.read_u8()? != 0)),
+            8 => Ok(MetadataValue::String(self.read_string()?)),
+            9 => {
+                // Array
+                let element_type = self.read_u32()?;
+                let array_len = self.read_u64()? as usize;
+                let mut array = Vec::with_capacity(array_len);
+
+                for _ in 0..array_len {
+                    // Temporarily set the reader state to read the element
+                    let value = self.read_typed_value(element_type)?;
+                    array.push(value);
+                }
+
+                Ok(MetadataValue::Array(array))
+            }
+            10 => Ok(MetadataValue::UInt64(self.read_u64()?)),
+            11 => Ok(MetadataValue::Int64(self.read_i64()?)),
+            12 => Ok(MetadataValue::Float64(self.read_f64()?)),
+            _ => Err(Error::ParseError(format!("Unknown metadata value type: {}", value_type))),
+        }
+    }
+
+    fn read_typed_value(&mut self, value_type: u32) -> Result<MetadataValue> {
+        match value_type {
+            0 => Ok(MetadataValue::UInt8(self.read_u8()?)),
+            1 => Ok(MetadataValue::Int8(self.read_i8()?)),
+            2 => Ok(MetadataValue::UInt16(self.read_u16()?)),
+            3 => Ok(MetadataValue::Int16(self.read_i16()?)),
+            4 => Ok(MetadataValue::UInt32(self.read_u32()?)),
+            5 => Ok(MetadataValue::Int32(self.read_i32()?)),
+            6 => Ok(MetadataValue::Float32(self.read_f32()?)),
+            7 => Ok(MetadataValue::Bool(self.read_u8()? != 0)),
+            8 => Ok(MetadataValue::String(self.read_string()?)),
+            10 => Ok(MetadataValue::UInt64(self.read_u64()?)),
+            11 => Ok(MetadataValue::Int64(self.read_i64()?)),
+            12 => Ok(MetadataValue::Float64(self.read_f64()?)),
+            _ => Err(Error::ParseError(format!("Unknown typed value: {}", value_type))),
+        }
     }
 
     fn parse_tensor_info(&mut self, count: u64) -> Result<Vec<TensorDesc>> {

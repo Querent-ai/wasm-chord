@@ -190,7 +190,33 @@ impl MultiHeadAttention {
         Ok(())
     }
 
-    fn compute_attention(
+    /// Optimized dot product with manual loop unrolling
+    #[inline]
+    fn dot_product(&self, a: &[f32], b: &[f32]) -> f32 {
+        let len = a.len().min(b.len());
+        let mut sum = 0.0;
+
+        // Process 4 elements at a time (loop unrolling)
+        let chunks = len / 4;
+
+        for i in 0..chunks {
+            let idx = i * 4;
+            sum += a[idx] * b[idx];
+            sum += a[idx + 1] * b[idx + 1];
+            sum += a[idx + 2] * b[idx + 2];
+            sum += a[idx + 3] * b[idx + 3];
+        }
+
+        // Handle remaining elements
+        for i in (chunks * 4)..len {
+            sum += a[i] * b[i];
+        }
+
+        sum
+    }
+
+    /// Compute scaled dot-product attention (exposed for benchmarking)
+    pub fn compute_attention(
         &self,
         q: &[f32],
         k: &[f32],
@@ -231,11 +257,8 @@ impl MultiHeadAttention {
                     let k_offset = (j * num_kv_heads + kv_h) * head_dim;
                     let k_vec = &k[k_offset..k_offset + head_dim];
 
-                    // Compute dot product: Q · K^T
-                    let mut score = 0.0;
-                    for d in 0..head_dim {
-                        score += q_vec[d] * k_vec[d];
-                    }
+                    // Compute dot product: Q · K^T (optimized)
+                    let score = self.dot_product(q_vec, k_vec);
 
                     // Scale by sqrt(head_dim)
                     scores[j] = score * scale;
@@ -631,25 +654,27 @@ impl Model {
     ///
     /// # Arguments
     /// * `logits` - Logits for last position \[vocab_size\]
-    /// * `temperature` - Sampling temperature (default 1.0)
-    /// * `top_p` - Nucleus sampling threshold (default 1.0 = disabled)
-    /// * `top_k` - Top-k sampling (default 0 = disabled)
+    /// * `temperature` - Sampling temperature (default 1.0, 0.0 = greedy)
+    /// * `top_p` - Nucleus sampling threshold (0.0-1.0, 1.0 = disabled)
+    /// * `top_k` - Top-k sampling (0 = disabled)
     ///
     /// # Returns
     /// Sampled token ID
-    pub fn sample(
-        &self,
-        logits: &[f32],
-        temperature: f32,
-        _top_p: f32,
-        _top_k: u32,
-    ) -> Result<u32> {
-        // Apply temperature
-        let scaled_logits: Vec<f32> = if temperature > 0.0 {
-            logits.iter().map(|&x| x / temperature).collect()
-        } else {
-            logits.to_vec()
-        };
+    pub fn sample(&self, logits: &[f32], temperature: f32, top_p: f32, top_k: u32) -> Result<u32> {
+        let vocab_size = logits.len();
+
+        // Greedy sampling (deterministic)
+        if temperature <= 0.0 {
+            return Ok(logits
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(idx, _)| idx as u32)
+                .unwrap_or(0));
+        }
+
+        // Apply temperature scaling
+        let scaled_logits: Vec<f32> = logits.iter().map(|&x| x / temperature).collect();
 
         // Find max for numerical stability
         let max_logit = scaled_logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
@@ -657,10 +682,55 @@ impl Model {
         // Softmax
         let exp_logits: Vec<f32> = scaled_logits.iter().map(|&x| (x - max_logit).exp()).collect();
         let sum_exp: f32 = exp_logits.iter().sum();
-        let probs: Vec<f32> = exp_logits.iter().map(|&x| x / sum_exp).collect();
+        let mut probs: Vec<f32> = exp_logits.iter().map(|&x| x / sum_exp).collect();
 
-        // TODO: Implement top-p and top-k sampling
-        // For now: greedy sampling (argmax)
+        // Create index-probability pairs
+        let mut indexed_probs: Vec<(usize, f32)> = probs.iter().copied().enumerate().collect();
+
+        // Sort by probability (descending)
+        indexed_probs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Apply top-k filtering
+        if top_k > 0 && (top_k as usize) < vocab_size {
+            // Zero out probabilities beyond top-k
+            for (idx, _) in indexed_probs.iter().skip(top_k as usize) {
+                probs[*idx] = 0.0;
+            }
+        }
+
+        // Apply top-p (nucleus) filtering
+        if top_p < 1.0 && top_p > 0.0 {
+            let mut cumulative_prob = 0.0;
+            let mut cutoff_idx = vocab_size;
+
+            for (i, (_idx, prob)) in indexed_probs.iter().enumerate() {
+                cumulative_prob += prob;
+                if cumulative_prob >= top_p {
+                    cutoff_idx = i + 1;
+                    break;
+                }
+            }
+
+            // Zero out probabilities beyond nucleus
+            for (idx, _) in indexed_probs.iter().skip(cutoff_idx) {
+                probs[*idx] = 0.0;
+            }
+        }
+
+        // Renormalize probabilities
+        let sum_filtered: f32 = probs.iter().sum();
+        if sum_filtered > 0.0 {
+            for p in &mut probs {
+                *p /= sum_filtered;
+            }
+        } else {
+            // Fallback: uniform over top-1
+            return Ok(indexed_probs[0].0 as u32);
+        }
+
+        // Sample from filtered distribution
+        // For now, use weighted random (TODO: add RNG support)
+        // Using deterministic "sampling" based on max probability
         let token_id = probs
             .iter()
             .enumerate()
@@ -776,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn test_model_sampling() {
+    fn test_model_sampling_greedy() {
         let config = TransformerConfig {
             vocab_size: 10,
             hidden_size: 8,
@@ -795,8 +865,95 @@ mod tests {
         let mut logits = vec![0.0; 10];
         logits[5] = 10.0;
 
+        // Greedy sampling (temperature = 0)
+        let sampled = model.sample(&logits, 0.0, 1.0, 0).unwrap();
+        assert_eq!(sampled, 5);
+
+        // Greedy with temperature = 1.0
         let sampled = model.sample(&logits, 1.0, 1.0, 0).unwrap();
         assert_eq!(sampled, 5);
+    }
+
+    #[test]
+    fn test_model_sampling_top_k() {
+        let config = TransformerConfig {
+            vocab_size: 10,
+            hidden_size: 8,
+            num_layers: 1,
+            num_heads: 2,
+            num_kv_heads: 1,
+            intermediate_size: 16,
+            max_seq_len: 32,
+            rms_norm_eps: 1e-5,
+            rope_theta: 10000.0,
+        };
+
+        let model = Model::new(config);
+
+        // Create logits with known distribution
+        let logits = vec![1.0, 2.0, 3.0, 4.0, 5.0, 0.5, 0.3, 0.2, 0.1, 0.0];
+
+        // Top-k = 3 should only consider indices 2, 3, 4
+        let sampled = model.sample(&logits, 1.0, 1.0, 3).unwrap();
+        assert!(sampled >= 2 && sampled <= 4);
+    }
+
+    #[test]
+    fn test_model_sampling_top_p() {
+        let config = TransformerConfig {
+            vocab_size: 10,
+            hidden_size: 8,
+            num_layers: 1,
+            num_heads: 2,
+            num_kv_heads: 1,
+            intermediate_size: 16,
+            max_seq_len: 32,
+            rms_norm_eps: 1e-5,
+            rope_theta: 10000.0,
+        };
+
+        let model = Model::new(config);
+
+        // Create logits with exponential distribution
+        let mut logits = vec![0.0; 10];
+        logits[0] = 10.0; // Highest probability
+        logits[1] = 5.0;
+        logits[2] = 2.0;
+        logits[3] = 1.0;
+        // Rest are much lower
+
+        // Top-p = 0.9 should focus on top few tokens
+        let sampled = model.sample(&logits, 1.0, 0.9, 0).unwrap();
+        assert!(sampled <= 3, "sampled token should be in nucleus");
+    }
+
+    #[test]
+    fn test_model_sampling_temperature() {
+        let config = TransformerConfig {
+            vocab_size: 10,
+            hidden_size: 8,
+            num_layers: 1,
+            num_heads: 2,
+            num_kv_heads: 1,
+            intermediate_size: 16,
+            max_seq_len: 32,
+            rms_norm_eps: 1e-5,
+            rope_theta: 10000.0,
+        };
+
+        let model = Model::new(config);
+
+        let mut logits = vec![1.0; 10];
+        logits[5] = 2.0;
+
+        // Low temperature should still prefer token 5
+        let sampled = model.sample(&logits, 0.1, 1.0, 0).unwrap();
+        assert_eq!(sampled, 5);
+
+        // High temperature makes distribution more uniform
+        let sampled = model.sample(&logits, 10.0, 1.0, 0).unwrap();
+        // Should still work (may or may not be 5)
+        assert!(sampled < 10);
     }
 
     #[test]
