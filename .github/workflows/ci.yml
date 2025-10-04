@@ -110,3 +110,50 @@ jobs:
       - run: cargo doc --workspace --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
+
+  benchmark:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache target directory
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-bench-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run CPU benchmarks (quick test)
+        run: cargo bench -p wasm-chord-cpu --bench gemm -- --test
+
+      - name: Run runtime benchmarks (quick test)
+        run: cargo bench -p wasm-chord-runtime --bench attention -- --test
+
+      - name: Run full benchmarks (on main branch only)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cargo bench -p wasm-chord-cpu --bench gemm | tee bench-cpu.txt
+          cargo bench -p wasm-chord-runtime --bench attention | tee bench-runtime.txt
+
+      - name: Upload benchmark results
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            bench-*.txt
+            target/criterion/

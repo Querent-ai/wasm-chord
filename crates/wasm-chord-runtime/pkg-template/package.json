@@ -1,0 +1,26 @@
+{
+  "name": "@querent-ai/wasm-chord",
+  "description": "High-performance WebAssembly LLM inference runtime with quantization support",
+  "keywords": [
+    "llm",
+    "inference",
+    "wasm",
+    "webassembly",
+    "transformers",
+    "quantization",
+    "gguf",
+    "machine-learning",
+    "ai"
+  ],
+  "homepage": "https://github.com/querent-ai/wasm-chord#readme",
+  "bugs": {
+    "url": "https://github.com/querent-ai/wasm-chord/issues"
+  },
+  "author": "Querent AI <team@querent.xyz>",
+  "contributors": [
+    "Querent AI Team"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

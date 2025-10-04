@@ -10,6 +10,12 @@ description = "WebAssembly runtime with C ABI for wasm-chord"
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
 
+[package.metadata.wasm-pack.profile.release.wasm-bindgen]
+# Optimize for size and performance
+debug-js-glue = false
+demangle-name-section = true
+dwarf-debug-info = false
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 

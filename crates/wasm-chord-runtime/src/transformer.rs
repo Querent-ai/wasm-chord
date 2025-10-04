@@ -895,7 +895,7 @@ mod tests {
 
         // Top-k = 3 should only consider indices 2, 3, 4
         let sampled = model.sample(&logits, 1.0, 1.0, 3).unwrap();
-        assert!(sampled >= 2 && sampled <= 4);
+        assert!((2..=4).contains(&sampled));
     }
 
     #[test]

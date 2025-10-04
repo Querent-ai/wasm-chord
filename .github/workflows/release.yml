@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+' # v1.0.0
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+' # v1.0.0-rc1
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (v#.#.#)'
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests
+        run: cargo test --workspace --all-features
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  build-wasm:
+    name: Build WASM Package
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build WASM package
+        run: |
+          cd crates/wasm-chord-runtime
+          wasm-pack build --target web --scope querent-ai --release
+
+      - name: Prepare NPM package
+        run: |
+          # Merge package template
+          bash scripts/prepare-npm.sh
+
+      - name: Update package.json version
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          cd crates/wasm-chord-runtime/pkg
+          VERSION=${GITHUB_REF#refs/tags/v}
+          npm version $VERSION --no-git-tag-version --allow-same-version
+
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-package
+          path: crates/wasm-chord-runtime/pkg/
+
+  publish-npm:
+    name: Publish to NPM
+    needs: build-wasm
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download WASM package
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-package
+          path: pkg
+
+      - name: Publish to NPM (latest)
+        if: "!contains(github.ref, '-rc')"
+        run: npm publish --tag latest --access public
+        working-directory: ./pkg
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+
+      - name: Publish to NPM (next/rc)
+        if: "contains(github.ref, '-rc')"
+        run: npm publish --tag next --access public
+        working-directory: ./pkg
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-wasm, publish-npm]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download WASM package
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-package
+          path: pkg
+
+      - name: Create tarball
+        run: |
+          cd pkg
+          tar -czf ../wasm-chord-${{ github.ref_name }}.tar.gz .
+          cd ..
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: wasm-chord-${{ github.ref_name }}.tar.gz
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref, '-rc') }}
