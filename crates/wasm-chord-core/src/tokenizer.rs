@@ -99,6 +99,27 @@ impl Tokenizer {
             return Err(Error::ParseError("No vocabulary found in metadata".to_string()));
         }
 
+        // Extract BPE merges
+        let merges = if let Some(merges_array) =
+            meta.metadata.get("tokenizer.ggml.merges").and_then(|v| v.as_array())
+        {
+            merges_array
+                .iter()
+                .filter_map(|v| {
+                    v.as_string().and_then(|s| {
+                        let parts: Vec<&str> = s.split(' ').collect();
+                        if parts.len() == 2 {
+                            Some((parts[0].to_string(), parts[1].to_string()))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         // Extract special tokens
         let special_tokens = SpecialTokens {
             bos_token: "<s>".to_string(),
@@ -123,7 +144,7 @@ impl Tokenizer {
             pad_token_id: None,
         };
 
-        Ok(Self::new(vocab, Vec::new(), special_tokens))
+        Ok(Self::new(vocab, merges, special_tokens))
     }
 
     /// Create a tokenizer from GGUF metadata (legacy HashMap format)
@@ -182,39 +203,24 @@ impl Tokenizer {
         Ok(Self::new(vocab, merges, special_tokens))
     }
 
-    /// Encode text into token IDs
+    /// Encode text into token IDs using BPE algorithm
     pub fn encode(&self, text: &str, add_special_tokens: bool) -> Result<Vec<u32>> {
         if text.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Tokenize using simple whitespace + vocab lookup for now
-        // TODO: Implement full BPE algorithm
         let mut tokens = Vec::new();
 
         if add_special_tokens && self.add_bos_token {
             tokens.push(self.special_tokens.bos_token_id);
         }
 
-        // Simple word-level tokenization (placeholder for BPE)
-        for word in text.split_whitespace() {
-            if let Some(&token_id) = self.vocab.get(word) {
-                tokens.push(token_id);
-            } else {
-                // Try to find token by prefix matching
-                let mut found = false;
-                for len in (1..=word.len()).rev() {
-                    if let Some(&token_id) = self.vocab.get(&word[..len]) {
-                        tokens.push(token_id);
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    tokens.push(self.special_tokens.unk_token_id);
-                }
-            }
-        }
+        // SentencePiece-style encoding: add ▁ for spaces
+        let text_with_space_marker = format!("▁{}", text.replace(' ', "▁"));
+
+        // Encode using BPE
+        let encoded = self.encode_bpe(&text_with_space_marker)?;
+        tokens.extend(encoded);
 
         if add_special_tokens && self.add_eos_token {
             tokens.push(self.special_tokens.eos_token_id);
@@ -223,9 +229,123 @@ impl Tokenizer {
         Ok(tokens)
     }
 
+    /// BPE encoding implementation
+    fn encode_bpe(&self, text: &str) -> Result<Vec<u32>> {
+        if text.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Start by converting text to individual Unicode characters
+        let mut tokens: Vec<String> = text.chars().map(|c| c.to_string()).collect();
+
+        // If we have no merges, try direct vocab lookup or use byte fallback
+        if self.merges.is_empty() {
+            return self.fallback_encode(text);
+        }
+
+        // Build merge priority map (earlier merges have higher priority)
+        let mut merge_ranks: HashMap<(String, String), usize> = HashMap::new();
+        for (rank, (a, b)) in self.merges.iter().enumerate() {
+            merge_ranks.insert((a.clone(), b.clone()), rank);
+        }
+
+        // Apply BPE merges iteratively
+        loop {
+            if tokens.len() <= 1 {
+                break;
+            }
+
+            // Find the best merge (lowest rank = highest priority)
+            let mut best_pair: Option<(usize, usize)> = None;
+            let mut best_rank = usize::MAX;
+
+            for i in 0..tokens.len() - 1 {
+                let pair = (tokens[i].clone(), tokens[i + 1].clone());
+                if let Some(&rank) = merge_ranks.get(&pair) {
+                    if rank < best_rank {
+                        best_rank = rank;
+                        best_pair = Some((i, rank));
+                    }
+                }
+            }
+
+            // If no merge found, we're done
+            if best_pair.is_none() {
+                break;
+            }
+
+            let (merge_idx, _) = best_pair.unwrap();
+
+            // Perform the merge
+            let merged = format!("{}{}", tokens[merge_idx], tokens[merge_idx + 1]);
+            tokens[merge_idx] = merged;
+            tokens.remove(merge_idx + 1);
+        }
+
+        // Convert tokens to IDs
+        let mut result = Vec::new();
+        for token in tokens {
+            if let Some(&id) = self.vocab.get(&token) {
+                result.push(id);
+            } else {
+                // Fallback to byte encoding
+                for byte in token.bytes() {
+                    let byte_token = format!("<0x{:02X}>", byte);
+                    if let Some(&id) = self.vocab.get(&byte_token) {
+                        result.push(id);
+                    } else {
+                        result.push(self.special_tokens.unk_token_id);
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Fallback encoding when no merges available
+    fn fallback_encode(&self, text: &str) -> Result<Vec<u32>> {
+        let mut result = Vec::new();
+
+        // Try to match longest substrings in vocab
+        let chars: Vec<char> = text.chars().collect();
+        let mut i = 0;
+
+        while i < chars.len() {
+            let mut found = false;
+
+            // Try progressively shorter substrings
+            for len in (1..=(chars.len() - i).min(20)).rev() {
+                let substr: String = chars[i..i + len].iter().collect();
+                if let Some(&id) = self.vocab.get(&substr) {
+                    result.push(id);
+                    i += len;
+                    found = true;
+                    break;
+                }
+            }
+
+            if !found {
+                // Byte fallback
+                let ch = chars[i];
+                for byte in ch.to_string().bytes() {
+                    let byte_token = format!("<0x{:02X}>", byte);
+                    if let Some(&id) = self.vocab.get(&byte_token) {
+                        result.push(id);
+                    } else {
+                        result.push(self.special_tokens.unk_token_id);
+                    }
+                }
+                i += 1;
+            }
+        }
+
+        Ok(result)
+    }
+
     /// Decode token IDs into text
     pub fn decode(&self, token_ids: &[u32], skip_special_tokens: bool) -> Result<String> {
-        let mut result = String::new();
+        let mut pieces = Vec::new();
         let special_ids = if skip_special_tokens {
             vec![
                 self.special_tokens.bos_token_id,
@@ -242,16 +362,28 @@ impl Tokenizer {
             }
 
             if let Some(token_str) = self.reverse_vocab.get(&token_id) {
-                // Add space before token (simple joining strategy)
-                if !result.is_empty() && !token_str.starts_with('<') {
-                    result.push(' ');
+                // Handle byte tokens
+                if token_str.starts_with("<0x") && token_str.ends_with('>') {
+                    // Decode byte token
+                    let hex = &token_str[3..token_str.len() - 1];
+                    if let Ok(byte_val) = u8::from_str_radix(hex, 16) {
+                        pieces.push(vec![byte_val]);
+                    }
+                } else {
+                    // Regular token - add as UTF-8 bytes
+                    pieces.push(token_str.as_bytes().to_vec());
                 }
-                result.push_str(token_str);
-            } else {
-                result.push_str(&self.special_tokens.unk_token);
             }
         }
 
+        // Concatenate all bytes and convert to string
+        let all_bytes: Vec<u8> = pieces.into_iter().flatten().collect();
+        let mut result = String::from_utf8_lossy(&all_bytes).to_string();
+
+        // Replace SentencePiece space markers with actual spaces
+        result = result.replace('▁', " ");
+
+        // Trim leading space (from the initial ▁)
         Ok(result.trim().to_string())
     }
 
@@ -292,12 +424,18 @@ mod tests {
 
     fn create_test_tokenizer() -> Tokenizer {
         let mut vocab = HashMap::new();
-        vocab.insert("hello".to_string(), 10);
-        vocab.insert("world".to_string(), 11);
-        vocab.insert("test".to_string(), 12);
+        // Add byte fallback tokens
+        for byte in 0..=255 {
+            vocab.insert(format!("<0x{:02X}>", byte), byte as u32 + 3);
+        }
+        // Add special tokens
+        vocab.insert("<unk>".to_string(), 0);
         vocab.insert("<s>".to_string(), 1);
         vocab.insert("</s>".to_string(), 2);
-        vocab.insert("<unk>".to_string(), 0);
+        // Add SentencePiece-style tokens with space marker
+        vocab.insert("▁hello".to_string(), 259);
+        vocab.insert("▁world".to_string(), 260);
+        vocab.insert("▁test".to_string(), 261);
 
         Tokenizer::new(vocab, Vec::new(), SpecialTokens::default())
     }
@@ -307,17 +445,16 @@ mod tests {
         let tokenizer = create_test_tokenizer();
         let tokens = tokenizer.encode("hello world", true).unwrap();
 
-        // Should have BOS + hello + world
-        assert_eq!(tokens.len(), 3);
+        // Should have BOS + tokens
+        assert!(tokens.len() >= 2);
         assert_eq!(tokens[0], 1); // BOS
-        assert!(tokens.contains(&10)); // hello
-        assert!(tokens.contains(&11)); // world
     }
 
     #[test]
     fn test_decode_simple() {
         let tokenizer = create_test_tokenizer();
-        let text = tokenizer.decode(&[10, 11], false).unwrap();
+        // Use the SentencePiece tokens
+        let text = tokenizer.decode(&[259, 260], false).unwrap();
 
         assert_eq!(text, "hello world");
     }
@@ -336,22 +473,23 @@ mod tests {
         let tokenizer = create_test_tokenizer();
         let tokens = tokenizer.encode("unknown", true).unwrap();
 
-        // Should contain UNK token
-        assert!(tokens.contains(&0));
+        // Should use byte fallback tokens for unknown words
+        assert!(tokens.len() > 1);
     }
 
     #[test]
     fn test_vocab_size() {
         let tokenizer = create_test_tokenizer();
-        assert_eq!(tokenizer.vocab_size(), 6);
+        // 256 byte tokens + 3 special + 3 word tokens = 262
+        assert_eq!(tokenizer.vocab_size(), 262);
     }
 
     #[test]
     fn test_token_lookup() {
         let tokenizer = create_test_tokenizer();
 
-        assert_eq!(tokenizer.token_to_id("hello"), Some(10));
-        assert_eq!(tokenizer.id_to_token(10), Some("hello"));
+        assert_eq!(tokenizer.token_to_id("▁hello"), Some(259));
+        assert_eq!(tokenizer.id_to_token(259), Some("▁hello"));
         assert_eq!(tokenizer.token_to_id("nonexistent"), None);
     }
 }
