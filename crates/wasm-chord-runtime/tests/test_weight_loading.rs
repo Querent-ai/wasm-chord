@@ -7,11 +7,17 @@ use wasm_chord_runtime::{Model, TransformerConfig};
 
 fn get_model_path() -> PathBuf {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    PathBuf::from(manifest_dir)
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("Failed to find workspace root")
-        .join("models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf")
+    let mut path = PathBuf::from(manifest_dir);
+    path.pop(); // Go to crates/
+    path.pop(); // Go to workspace root
+
+    // Try Q4_K_M first (proper format with scales), fallback to Q4_0
+    let q4km_path = path.join("models/tinyllama-q4km.gguf");
+    if q4km_path.exists() {
+        q4km_path
+    } else {
+        path.join("models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf")
+    }
 }
 
 #[test]

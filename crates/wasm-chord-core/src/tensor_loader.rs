@@ -90,7 +90,7 @@ impl TensorLoader {
             }
             DataType::Q4_0 => {
                 // Dequantize Q4_0
-                self.dequantize_q4_0(&raw_data, metadata.desc.element_count())?
+                self.dequantize_q4_0(name, &raw_data, metadata.desc.element_count())?
             }
             DataType::Q8_0 => {
                 // Dequantize Q8_0
@@ -154,18 +154,60 @@ impl TensorLoader {
 
     // Helper methods for dequantization
 
-    fn dequantize_q4_0(&self, data: &[u8], element_count: usize) -> Result<Vec<f32>> {
+    fn dequantize_q4_0(
+        &self,
+        tensor_name: &str,
+        data: &[u8],
+        element_count: usize,
+    ) -> Result<Vec<f32>> {
         const BLOCK_SIZE: usize = std::mem::size_of::<BlockQ4_0>();
-        let mut result = vec![0.0f32; element_count];
+        const ELEMENTS_PER_BLOCK: usize = 32;
 
-        static FIRST_CALL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
-        if FIRST_CALL.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        // Calculate actual number of blocks from data size
+        let num_blocks = data.len() / BLOCK_SIZE;
+        let actual_elements = num_blocks * ELEMENTS_PER_BLOCK;
+
+        // Use the smaller of the two to avoid buffer overruns
+        let result_size = actual_elements.min(element_count);
+        let mut result = vec![0.0f32; result_size];
+
+        // Debug output - use a counter to track calls
+        static CALL_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let call_num = CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        if call_num < 5 {
             eprintln!(
-                "Q4_0 dequant: BLOCK_SIZE={}, data.len()={}, element_count={}",
+                "[Q4_0 dequant call #{}] tensor='{}', BLOCK_SIZE={}, data.len()={}, element_count={}",
+                call_num,
+                tensor_name,
                 BLOCK_SIZE,
                 data.len(),
                 element_count
             );
+
+            // Check if size matches expected
+            let expected_blocks = element_count / 32;
+            let expected_bytes = expected_blocks * BLOCK_SIZE;
+            if data.len() != expected_bytes {
+                eprintln!(
+                    "  WARNING: Size mismatch! Expected {} bytes but got {}",
+                    expected_bytes,
+                    data.len()
+                );
+            }
+
+            // Dump first 18 bytes to see actual layout
+            if !data.is_empty() {
+                eprintln!("  First block raw bytes:");
+                eprint!("    ");
+                for (i, &byte) in data.iter().take(18).enumerate() {
+                    eprint!("{:02x} ", byte);
+                    if i == 1 {
+                        eprint!("| "); // After scale (2 bytes)
+                    }
+                }
+                eprintln!();
+            }
         }
 
         for (block_idx, block_bytes) in data.chunks_exact(BLOCK_SIZE).enumerate() {
@@ -186,12 +228,7 @@ impl TensorLoader {
                             "WARNING: Q4_0 block {} produced nan={}, inf={}",
                             block_idx, has_nan, has_inf
                         );
-                        eprintln!(
-                            "  Block scale_f16={:.6} (raw={:#x}), quants[0]={:#x}",
-                            half::f16::from_bits(block.scale).to_f32(),
-                            block.scale,
-                            block.quants[0]
-                        );
+                        eprintln!("  Block quants[0]={:#x}", block.quants[0]);
                     }
                 }
             }
