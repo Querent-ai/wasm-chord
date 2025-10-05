@@ -847,7 +847,9 @@ impl Model {
         }
 
         // 2. Pass through transformer layers
+        let profile = std::env::var("PROFILE").is_ok();
         for layer_idx in 0..self.config.num_layers {
+            let layer_start = std::time::Instant::now();
             let kv_cache = &mut self.kv_caches[layer_idx];
             if std::env::var("DEBUG_KV").is_ok() {
                 eprintln!(
@@ -856,6 +858,9 @@ impl Model {
                 );
             }
             hidden_states = self.layers[layer_idx].forward(&hidden_states, kv_cache, position)?;
+            if profile {
+                eprintln!("  Layer {} took {:?}", layer_idx, layer_start.elapsed());
+            }
             if std::env::var("DEBUG_KV").is_ok() {
                 eprintln!(
                     "✅ Layer {}, pos={}, kv_cache.seq_pos AFTER layer={}",
@@ -1044,14 +1049,18 @@ impl Model {
         let mut pos = 0;
         let mut token = tokens[0];
 
-        eprintln!("DEBUG: Starting generation with {} prompt tokens", num_prompt_tokens);
+        if std::env::var("DEBUG").is_ok() {
+            eprintln!("DEBUG: Starting generation with {} prompt tokens", num_prompt_tokens);
+        }
 
         // Main generation loop - handles both prompt processing and token generation
         // This follows the llama2.c pattern exactly
         while pos < num_prompt_tokens + max_tokens - 1 {
             // Forward pass: process current token at current position
             // This adds the token to KV cache at position 'pos'
-            eprintln!("DEBUG: pos={}, token={}", pos, token);
+            if std::env::var("DEBUG").is_ok() {
+                eprintln!("DEBUG: pos={}, token={}", pos, token);
+            }
 
             // Check KV cache state before forward
             if std::env::var("DEBUG_KV").is_ok() && !self.kv_caches.is_empty() {
@@ -1073,27 +1082,15 @@ impl Model {
             if pos < num_prompt_tokens - 1 {
                 // Still processing prompt - force next prompt token
                 next = tokens[pos + 1];
-                eprintln!("DEBUG: Forcing prompt token {}", next);
             } else {
                 // Past prompt - sample next token from logits
                 // Apply repetition penalty to discourage repeated tokens
                 self.apply_repetition_penalty(&mut last_logits, &tokens, repetition_penalty);
 
-                // Debug: show top 5 logits
-                let mut indexed_logits: Vec<(usize, f32)> =
-                    last_logits.iter().copied().enumerate().collect();
-                indexed_logits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-                eprintln!(
-                    "DEBUG: Top 5 logits: {:?}",
-                    &indexed_logits[..5.min(indexed_logits.len())]
-                );
-
                 next = self.sample(&last_logits, temperature, top_p, top_k)?;
-                eprintln!("DEBUG: Sampled token {}", next);
 
                 // Check for EOS token
                 if next == tokenizer.special_tokens().eos_token_id {
-                    eprintln!("DEBUG: EOS token encountered, stopping");
                     break;
                 }
 
@@ -1106,8 +1103,6 @@ impl Model {
             pos += 1;
             token = next;
         }
-
-        eprintln!("DEBUG: Final tokens: {:?}", tokens);
 
         // Decode all tokens to text (skip special tokens)
         let generated_text = tokenizer.decode(&tokens, true)?;

@@ -34,29 +34,39 @@ pub fn matmul_f32(a: &[f32], b: &[f32], c: &mut [f32], m: usize, k: usize, n: us
     // Zero output
     c.fill(0.0);
 
-    // Optimized with loop unrolling and better memory access
-    for i in 0..m {
-        let a_row = &a[i * k..(i + 1) * k];
+    // Use blocked/tiled multiplication for better cache locality
+    const BLOCK_SIZE: usize = 64;
 
-        for j in 0..n {
-            let mut sum = 0.0;
-            let chunks = k / 4;
+    for i0 in (0..m).step_by(BLOCK_SIZE) {
+        for j0 in (0..n).step_by(BLOCK_SIZE) {
+            for l0 in (0..k).step_by(BLOCK_SIZE) {
+                let i_max = (i0 + BLOCK_SIZE).min(m);
+                let j_max = (j0 + BLOCK_SIZE).min(n);
+                let l_max = (l0 + BLOCK_SIZE).min(k);
 
-            // Process 4 elements at a time (loop unrolling)
-            for l in 0..chunks {
-                let idx = l * 4;
-                sum += a_row[idx] * b[idx * n + j];
-                sum += a_row[idx + 1] * b[(idx + 1) * n + j];
-                sum += a_row[idx + 2] * b[(idx + 2) * n + j];
-                sum += a_row[idx + 3] * b[(idx + 3) * n + j];
+                // Process block
+                for i in i0..i_max {
+                    for l in l0..l_max {
+                        let a_val = a[i * k + l];
+                        let b_row = l * n;
+
+                        // Process 4 columns at a time within this block
+                        let chunks = (j_max - j0) / 4;
+                        for idx in 0..chunks {
+                            let j = j0 + idx * 4;
+                            c[i * n + j] += a_val * b[b_row + j];
+                            c[i * n + j + 1] += a_val * b[b_row + j + 1];
+                            c[i * n + j + 2] += a_val * b[b_row + j + 2];
+                            c[i * n + j + 3] += a_val * b[b_row + j + 3];
+                        }
+
+                        // Handle remainder columns
+                        for j in (j0 + chunks * 4)..j_max {
+                            c[i * n + j] += a_val * b[b_row + j];
+                        }
+                    }
+                }
             }
-
-            // Handle remainder
-            for l in (chunks * 4)..k {
-                sum += a_row[l] * b[l * n + j];
-            }
-
-            c[i * n + j] = sum;
         }
     }
 
