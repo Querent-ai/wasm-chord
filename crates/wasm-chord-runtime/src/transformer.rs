@@ -64,7 +64,6 @@ impl From<wasm_chord_core::TransformerConfigData> for TransformerConfig {
 
 /// KV cache for a single layer
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct KVCache {
     /// Cached keys [batch, seq_len, num_kv_heads, head_dim]
     pub keys: Vec<f32>,
@@ -167,17 +166,32 @@ impl MultiHeadAttention {
         )?;
 
         // Apply RoPE (Rotary Position Embedding)
-        // NOTE: For now, using simplified RoPE that applies same position to all tokens in batch
-        // This is correct for seq_len=1 (incremental generation) but not ideal for prefill
-        self.apply_rope_simple(&mut q, position)?;
-        self.apply_rope_simple(&mut k, position)?;
+        // Apply different positions for each token in the sequence
+        self.apply_rope(&mut q, position, seq_len, self.config.num_heads)?;
+        self.apply_rope(&mut k, position, seq_len, self.config.num_kv_heads)?;
 
         // Cache K, V
+        if std::env::var("DEBUG_KV").is_ok() {
+            eprintln!(
+                "  Before append: kv_cache.seq_pos={}, adding {} elements",
+                kv_cache.seq_pos,
+                k.len()
+            );
+        }
         kv_cache.append(&k, &v);
+        if std::env::var("DEBUG_KV").is_ok() {
+            eprintln!("  After append: kv_cache.seq_pos={}", kv_cache.seq_pos);
+        }
 
         // Compute attention (pass position for correct causal masking)
-        let output =
-            self.compute_attention(&q, &kv_cache.keys, &kv_cache.values, seq_len, position)?;
+        // Only pass the valid portion of the cache (up to seq_pos)
+        let output = self.compute_attention(
+            &q,
+            &kv_cache.keys[..kv_cache.seq_pos],
+            &kv_cache.values[..kv_cache.seq_pos],
+            seq_len,
+            position,
+        )?;
 
         // Output projection
         let mut result = vec![0.0; seq_len * hidden_size];
@@ -186,26 +200,49 @@ impl MultiHeadAttention {
         Ok(result)
     }
 
-    // Simplified RoPE: applies same position to all tokens in tensor
-    // Correct for seq_len=1, but not perfect for prefill (seq_len>1)
-    fn apply_rope_simple(&self, tensor: &mut [f32], position: usize) -> Result<()> {
+    /// Apply RoPE (Rotary Position Embedding) correctly for multiple tokens
+    ///
+    /// # Arguments
+    /// * `tensor` - Q or K tensor with shape [seq_len, num_heads, head_dim]
+    /// * `start_pos` - Starting position in the sequence
+    /// * `seq_len` - Number of tokens in this batch
+    /// * `num_heads` - Number of heads (num_heads for Q, num_kv_heads for K/V)
+    fn apply_rope(
+        &self,
+        tensor: &mut [f32],
+        start_pos: usize,
+        seq_len: usize,
+        num_heads: usize,
+    ) -> Result<()> {
         let head_dim = self.head_dim;
-        let num_heads = tensor.len() / head_dim;
 
-        for head in 0..num_heads {
-            for i in 0..head_dim / 2 {
-                let idx = head * head_dim + i;
-                let freq = 1.0 / self.config.rope_theta.powf(2.0 * i as f32 / head_dim as f32);
-                let angle = position as f32 * freq;
+        // For each token in the sequence
+        for seq_idx in 0..seq_len {
+            let token_pos = start_pos + seq_idx;
 
-                let cos = angle.cos();
-                let sin = angle.sin();
+            // For each head
+            for head in 0..num_heads {
+                // For each pair of dimensions
+                for i in 0..head_dim / 2 {
+                    // Calculate index in tensor: [seq_idx][head][pair_idx]
+                    let base_idx = (seq_idx * num_heads + head) * head_dim;
+                    let idx0 = base_idx + i;
+                    let idx1 = base_idx + i + head_dim / 2;
 
-                let x0 = tensor[idx];
-                let x1 = tensor[idx + head_dim / 2];
+                    // RoPE frequency calculation
+                    let freq = 1.0 / self.config.rope_theta.powf(2.0 * i as f32 / head_dim as f32);
+                    let angle = token_pos as f32 * freq;
 
-                tensor[idx] = x0 * cos - x1 * sin;
-                tensor[idx + head_dim / 2] = x0 * sin + x1 * cos;
+                    let cos = angle.cos();
+                    let sin = angle.sin();
+
+                    // Rotate the pair
+                    let x0 = tensor[idx0];
+                    let x1 = tensor[idx1];
+
+                    tensor[idx0] = x0 * cos - x1 * sin;
+                    tensor[idx1] = x0 * sin + x1 * cos;
+                }
             }
         }
 
@@ -258,6 +295,15 @@ impl MultiHeadAttention {
         // K, V shape: [kv_seq_len, num_kv_heads, head_dim]
         let kv_seq_len = k.len() / (num_kv_heads * head_dim);
 
+        if std::env::var("DEBUG_ATTN").is_ok() {
+            eprintln!(
+                "ATTN: seq_len={}, kv_seq_len={}, position={}",
+                seq_len, kv_seq_len, position
+            );
+            eprintln!("  Q shape: [{}x{}x{}]", seq_len, num_heads, head_dim);
+            eprintln!("  K/V shape in cache: [{}x{}x{}]", kv_seq_len, num_kv_heads, head_dim);
+        }
+
         let mut output = vec![0.0; seq_len * num_heads * head_dim];
         let scale = 1.0 / (head_dim as f32).sqrt();
 
@@ -286,8 +332,9 @@ impl MultiHeadAttention {
                     // Scale by sqrt(head_dim)
                     scores[j] = score * scale;
 
-                    // Causal masking: can only attend to positions up to current absolute position
-                    // For incremental generation: position + i is the absolute position of query token
+                    // Causal masking: can only attend to positions up to and including current position
+                    // llama2.c does: for (t = 0; t <= pos; t++) { compute attention }
+                    // So position `position + i` can attend to all j <= position + i
                     let query_abs_pos = position + i;
                     if j > query_abs_pos {
                         scores[j] = f32::NEG_INFINITY;
@@ -527,6 +574,19 @@ pub struct Model {
     pub kv_caches: Vec<KVCache>,
 }
 
+/// Transpose a matrix stored in row-major order
+/// Input: [rows, cols] in row-major order
+/// Output: [cols, rows] in row-major order
+fn transpose_matrix(matrix: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let mut transposed = vec![0.0; rows * cols];
+    for i in 0..rows {
+        for j in 0..cols {
+            transposed[j * rows + i] = matrix[i * cols + j];
+        }
+    }
+    transposed
+}
+
 impl Model {
     /// Create a new model with initialized (zero) weights
     pub fn new(config: TransformerConfig) -> Self {
@@ -578,10 +638,19 @@ impl Model {
 
         // Load LM head (or tie with embeddings)
         if let Ok(lm_head_data) = tensor_loader.load_tensor("output.weight", parser) {
-            self.lm_head.copy_from_slice(lm_head_data);
+            // Transpose: [vocab_size, hidden_size] -> [hidden_size, vocab_size]
+            let lm_head_transposed =
+                transpose_matrix(lm_head_data, self.config.vocab_size, self.config.hidden_size);
+            self.lm_head.copy_from_slice(&lm_head_transposed);
         } else {
             // Weight tying: LM head shares weights with token embeddings
-            self.lm_head.copy_from_slice(&self.token_embeddings);
+            // Token embeddings are [vocab_size, hidden_size], transpose to [hidden_size, vocab_size]
+            let lm_head_transposed = transpose_matrix(
+                &self.token_embeddings,
+                self.config.vocab_size,
+                self.config.hidden_size,
+            );
+            self.lm_head.copy_from_slice(&lm_head_transposed);
         }
 
         // Load each layer's weights
@@ -617,39 +686,54 @@ impl Model {
             };
 
             if let Ok(wq) = tensor_loader.load_tensor(&wq_name, parser) {
-                layer.attention_weights.wq.copy_from_slice(wq);
+                // GGUF stores weights as [out, in] but our matmul expects [in, out]
+                // Transpose: [hidden_size, hidden_size] -> [hidden_size, hidden_size]
+                let wq_transposed =
+                    transpose_matrix(wq, self.config.hidden_size, self.config.hidden_size);
+                layer.attention_weights.wq.copy_from_slice(&wq_transposed);
                 if layer_idx == 0 {
                     let has_nan = wq.iter().any(|&x| x.is_nan());
                     let has_inf = wq.iter().any(|&x| x.is_infinite());
                     let sum: f32 = wq.iter().take(100).sum();
                     let min = wq.iter().copied().fold(f32::INFINITY, f32::min);
                     let max = wq.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                    eprintln!("Loaded {}: {} elements, nan={}, inf={}, sum100={:.6}, range=[{:.6}, {:.6}]",
+                    eprintln!("Loaded {}: {} elements (transposed), nan={}, inf={}, sum100={:.6}, range=[{:.6}, {:.6}]",
                               wq_name, wq.len(), has_nan, has_inf, sum, min, max);
                 }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wq_name);
             }
             if let Ok(wk) = tensor_loader.load_tensor(&wk_name, parser) {
-                layer.attention_weights.wk.copy_from_slice(wk);
+                // Transpose: [kv_dim, hidden_size] -> [hidden_size, kv_dim]
+                let kv_dim =
+                    self.config.num_kv_heads * (self.config.hidden_size / self.config.num_heads);
+                let wk_transposed = transpose_matrix(wk, kv_dim, self.config.hidden_size);
+                layer.attention_weights.wk.copy_from_slice(&wk_transposed);
                 if layer_idx == 0 {
-                    eprintln!("Loaded {}: {} elements", wk_name, wk.len());
+                    eprintln!("Loaded {}: {} elements (transposed)", wk_name, wk.len());
                 }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wk_name);
             }
             if let Ok(wv) = tensor_loader.load_tensor(&wv_name, parser) {
-                layer.attention_weights.wv.copy_from_slice(wv);
+                // Transpose: [kv_dim, hidden_size] -> [hidden_size, kv_dim]
+                let kv_dim =
+                    self.config.num_kv_heads * (self.config.hidden_size / self.config.num_heads);
+                let wv_transposed = transpose_matrix(wv, kv_dim, self.config.hidden_size);
+                layer.attention_weights.wv.copy_from_slice(&wv_transposed);
                 if layer_idx == 0 {
-                    eprintln!("Loaded {}: {} elements", wv_name, wv.len());
+                    eprintln!("Loaded {}: {} elements (transposed)", wv_name, wv.len());
                 }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wv_name);
             }
             if let Ok(wo) = tensor_loader.load_tensor(&wo_name, parser) {
-                layer.attention_weights.wo.copy_from_slice(wo);
+                // Transpose: [hidden_size, hidden_size] -> [hidden_size, hidden_size]
+                let wo_transposed =
+                    transpose_matrix(wo, self.config.hidden_size, self.config.hidden_size);
+                layer.attention_weights.wo.copy_from_slice(&wo_transposed);
                 if layer_idx == 0 {
-                    eprintln!("Loaded {}: {} elements", wo_name, wo.len());
+                    eprintln!("Loaded {}: {} elements (transposed)", wo_name, wo.len());
                 }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wo_name);
@@ -667,13 +751,22 @@ impl Model {
             let ffn_down_name = format!("blk.{}.ffn_down.weight", layer_idx);
 
             if let Ok(gate) = tensor_loader.load_tensor(&ffn_gate_name, parser) {
-                layer.ffn_weights.w_gate.copy_from_slice(gate);
+                // Transpose: [intermediate_size, hidden_size] -> [hidden_size, intermediate_size]
+                let gate_transposed =
+                    transpose_matrix(gate, self.config.intermediate_size, self.config.hidden_size);
+                layer.ffn_weights.w_gate.copy_from_slice(&gate_transposed);
             }
             if let Ok(up) = tensor_loader.load_tensor(&ffn_up_name, parser) {
-                layer.ffn_weights.w_up.copy_from_slice(up);
+                // Transpose: [intermediate_size, hidden_size] -> [hidden_size, intermediate_size]
+                let up_transposed =
+                    transpose_matrix(up, self.config.intermediate_size, self.config.hidden_size);
+                layer.ffn_weights.w_up.copy_from_slice(&up_transposed);
             }
             if let Ok(down) = tensor_loader.load_tensor(&ffn_down_name, parser) {
-                layer.ffn_weights.w_down.copy_from_slice(down);
+                // Transpose: [hidden_size, intermediate_size] -> [intermediate_size, hidden_size]
+                let down_transposed =
+                    transpose_matrix(down, self.config.hidden_size, self.config.intermediate_size);
+                layer.ffn_weights.w_down.copy_from_slice(&down_transposed);
             }
 
             // FFN norm
@@ -867,44 +960,73 @@ impl Model {
             return Err(Error::ParseError("Empty token sequence".to_string()));
         }
 
-        // Process prompt (prefill) - this fills the KV cache for positions 0..tokens.len()-1
-        let prefill_logits = self.forward(&tokens, 0)?;
+        let num_prompt_tokens = tokens.len();
+        let mut pos = 0;
+        let mut token = tokens[0];
 
-        // Get logits for the last token of the prompt
-        let last_logits = &prefill_logits[(prefill_logits.len() - self.config.vocab_size)..];
+        eprintln!("DEBUG: Starting generation with {} prompt tokens", num_prompt_tokens);
 
-        // Sample first generated token from prompt logits
-        let first_token = self.sample(last_logits, temperature, top_p, top_k)?;
-        if first_token == tokenizer.special_tokens().eos_token_id {
-            return tokenizer.decode(&tokens, true);
-        }
-        tokens.push(first_token);
+        // Main generation loop - handles both prompt processing and token generation
+        // This follows the llama2.c pattern exactly
+        while pos < num_prompt_tokens + max_tokens - 1 {
+            // Forward pass: process current token at current position
+            // This adds the token to KV cache at position 'pos'
+            eprintln!("DEBUG: pos={}, token={}", pos, token);
 
-        // Generate remaining tokens one by one
-        for _ in 1..max_tokens {
-            // Get last generated token
-            let last_token = *tokens.last().unwrap();
-            // Position for this new token (KV cache already has 0..tokens.len()-1)
-            let current_position = tokens.len() - 1;
-
-            // Forward pass for single token at current position
-            let logits = self.forward(&[last_token], current_position)?;
-
-            // Get logits for last position
-            let last_logits = &logits[(logits.len() - self.config.vocab_size)..];
-
-            // Sample next token
-            let next_token = self.sample(last_logits, temperature, top_p, top_k)?;
-
-            // Check for EOS token
-            if next_token == tokenizer.special_tokens().eos_token_id {
-                break;
+            // Check KV cache state before forward
+            if std::env::var("DEBUG_KV").is_ok() && !self.kv_caches.is_empty() {
+                eprintln!("  KV cache seq_pos={}", self.kv_caches[0].seq_pos);
             }
 
-            tokens.push(next_token);
+            let logits = self.forward(&[token], pos)?;
+
+            // Check KV cache state after forward
+            if std::env::var("DEBUG_KV").is_ok() && !self.kv_caches.is_empty() {
+                eprintln!("  KV cache seq_pos after={}", self.kv_caches[0].seq_pos);
+            }
+
+            // Get logits for the last position
+            let last_logits = &logits[(logits.len() - self.config.vocab_size)..];
+
+            // Determine next token
+            let next;
+            if pos < num_prompt_tokens - 1 {
+                // Still processing prompt - force next prompt token
+                next = tokens[pos + 1];
+                eprintln!("DEBUG: Forcing prompt token {}", next);
+            } else {
+                // Past prompt - sample next token from logits
+                // Debug: show top 5 logits
+                let mut indexed_logits: Vec<(usize, f32)> =
+                    last_logits.iter().copied().enumerate().collect();
+                indexed_logits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                eprintln!(
+                    "DEBUG: Top 5 logits: {:?}",
+                    &indexed_logits[..5.min(indexed_logits.len())]
+                );
+
+                next = self.sample(last_logits, temperature, top_p, top_k)?;
+                eprintln!("DEBUG: Sampled token {}", next);
+
+                // Check for EOS token
+                if next == tokenizer.special_tokens().eos_token_id {
+                    eprintln!("DEBUG: EOS token encountered, stopping");
+                    break;
+                }
+
+                // Add generated token to our sequence
+                tokens.push(next);
+            }
+
+            // Advance position FIRST, then update token for next iteration
+            // This is the key pattern from llama2.c
+            pos += 1;
+            token = next;
         }
 
-        // Decode tokens to text (skip special tokens)
+        eprintln!("DEBUG: Final tokens: {:?}", tokens);
+
+        // Decode all tokens to text (skip special tokens)
         let generated_text = tokenizer.decode(&tokens, true)?;
 
         Ok(generated_text)

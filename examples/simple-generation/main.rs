@@ -58,8 +58,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // === Generate Text ===
     let prompt = "Hello";
-    let max_tokens = 20;
-    let temperature = 0.0; // Greedy sampling
+    let max_tokens = 3; // Just a few tokens for comparison
+    let temperature = 0.0; // Deterministic greedy sampling
 
     println!("🎲 Generating text...");
     println!("   Prompt: {:?}", prompt);
