@@ -192,6 +192,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore] // Requires GPU hardware - skip in CI
     fn test_matmul_simple() {
         pollster::block_on(async {
             let gpu = GpuBackend::new().await.expect("Failed to init GPU");
