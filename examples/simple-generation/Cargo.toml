@@ -1,0 +1,12 @@
+[package]
+name = "wasm-chord-simple-generation"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "simple-generation"
+path = "main.rs"
+
+[dependencies]
+wasm-chord-core.workspace = true
+wasm-chord-runtime.workspace = true

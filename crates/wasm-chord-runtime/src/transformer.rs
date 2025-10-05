@@ -3,6 +3,7 @@
 //! Implements the core transformer components for LLM inference.
 
 use wasm_chord_core::error::Result;
+use wasm_chord_core::Tokenizer;
 use wasm_chord_cpu::matmul_f32;
 
 /// Transformer configuration
@@ -810,6 +811,71 @@ impl Model {
             .unwrap_or(0);
 
         Ok(token_id)
+    }
+
+    /// Generate text from a prompt
+    ///
+    /// # Arguments
+    /// * `prompt` - Input text prompt
+    /// * `tokenizer` - Tokenizer for encoding/decoding
+    /// * `max_tokens` - Maximum number of tokens to generate
+    /// * `temperature` - Sampling temperature (0.0 = greedy)
+    /// * `top_p` - Nucleus sampling threshold
+    /// * `top_k` - Top-k sampling
+    ///
+    /// # Returns
+    /// Generated text
+    pub fn generate(
+        &mut self,
+        prompt: &str,
+        tokenizer: &Tokenizer,
+        max_tokens: usize,
+        temperature: f32,
+        top_p: f32,
+        top_k: u32,
+    ) -> Result<String> {
+        use wasm_chord_core::error::Error;
+
+        // Clear KV cache for new generation
+        self.clear_kv_cache();
+
+        // Encode prompt
+        let mut tokens = tokenizer.encode(prompt, true)?;
+
+        if tokens.is_empty() {
+            return Err(Error::ParseError("Empty token sequence".to_string()));
+        }
+
+        // Process prompt (prefill)
+        let _logits = self.forward(&tokens, 0)?;
+        let position = tokens.len();
+
+        // Generate tokens one by one
+        for _ in 0..max_tokens {
+            // Get last token
+            let last_token = *tokens.last().unwrap();
+
+            // Forward pass for single token
+            let logits = self.forward(&[last_token], position + tokens.len() - 1)?;
+
+            // Get logits for last position
+            let last_logits = &logits[(logits.len() - self.config.vocab_size)..];
+
+            // Sample next token
+            let next_token = self.sample(last_logits, temperature, top_p, top_k)?;
+
+            // Check for EOS token
+            if next_token == tokenizer.special_tokens().eos_token_id {
+                break;
+            }
+
+            tokens.push(next_token);
+        }
+
+        // Decode tokens to text (skip special tokens)
+        let generated_text = tokenizer.decode(&tokens, true)?;
+
+        Ok(generated_text)
     }
 
     /// Clear all KV caches (for new sequence)

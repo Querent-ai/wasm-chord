@@ -3,8 +3,8 @@
 //! Supports BPE (Byte-Pair Encoding) tokenization with vocabulary loaded from GGUF metadata.
 
 use crate::error::{Error, Result};
+use crate::formats::gguf::ModelMeta;
 use std::collections::HashMap;
-use unicode_normalization::UnicodeNormalization;
 
 /// Special tokens used by the tokenizer
 #[derive(Debug, Clone)]
@@ -78,7 +78,55 @@ impl Tokenizer {
         }
     }
 
-    /// Create a tokenizer from GGUF metadata
+    /// Create a tokenizer from GGUF ModelMeta
+    pub fn from_gguf(meta: &ModelMeta) -> Result<Self> {
+        // Extract tokens array from metadata
+        let tokens_array =
+            meta.metadata.get("tokenizer.ggml.tokens").and_then(|v| v.as_array()).ok_or_else(
+                || Error::ParseError("No tokenizer.ggml.tokens in metadata".to_string()),
+            )?;
+
+        let mut vocab = HashMap::new();
+        for (id, token_val) in tokens_array.iter().enumerate() {
+            let token_str = token_val
+                .as_string()
+                .ok_or_else(|| Error::ParseError(format!("Token {} is not a string", id)))?
+                .to_string();
+            vocab.insert(token_str, id as u32);
+        }
+
+        if vocab.is_empty() {
+            return Err(Error::ParseError("No vocabulary found in metadata".to_string()));
+        }
+
+        // Extract special tokens
+        let special_tokens = SpecialTokens {
+            bos_token: "<s>".to_string(),
+            eos_token: "</s>".to_string(),
+            unk_token: "<unk>".to_string(),
+            pad_token: None,
+            bos_token_id: meta
+                .metadata
+                .get("tokenizer.ggml.bos_token_id")
+                .and_then(|v| v.as_u32())
+                .unwrap_or(1),
+            eos_token_id: meta
+                .metadata
+                .get("tokenizer.ggml.eos_token_id")
+                .and_then(|v| v.as_u32())
+                .unwrap_or(2),
+            unk_token_id: meta
+                .metadata
+                .get("tokenizer.ggml.unknown_token_id")
+                .and_then(|v| v.as_u32())
+                .unwrap_or(0),
+            pad_token_id: None,
+        };
+
+        Ok(Self::new(vocab, Vec::new(), special_tokens))
+    }
+
+    /// Create a tokenizer from GGUF metadata (legacy HashMap format)
     pub fn from_gguf_metadata(metadata: &HashMap<String, String>) -> Result<Self> {
         // Extract vocabulary from metadata
         let vocab_size = metadata
@@ -140,9 +188,6 @@ impl Tokenizer {
             return Ok(Vec::new());
         }
 
-        // Normalize text (NFC normalization)
-        let normalized: String = text.nfc().collect();
-
         // Tokenize using simple whitespace + vocab lookup for now
         // TODO: Implement full BPE algorithm
         let mut tokens = Vec::new();
@@ -152,7 +197,7 @@ impl Tokenizer {
         }
 
         // Simple word-level tokenization (placeholder for BPE)
-        for word in normalized.split_whitespace() {
+        for word in text.split_whitespace() {
             if let Some(&token_id) = self.vocab.get(word) {
                 tokens.push(token_id);
             } else {

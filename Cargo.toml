@@ -7,6 +7,7 @@ members = [
     "crates/wasm-chord-cpu",
     "examples/cli",
     "examples/inference",
+    "examples/simple-generation",
 ]
 
 [workspace.package]
