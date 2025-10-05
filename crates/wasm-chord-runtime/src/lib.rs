@@ -10,7 +10,7 @@ mod transformer;
 pub use abi::*;
 pub use context::RuntimeContext;
 pub use inference::{GenOptions, GenerationState, InferenceSession};
-pub use transformer::{KVCache, Model, MultiHeadAttention, TransformerConfig};
+pub use transformer::{GenerationConfig, KVCache, Model, MultiHeadAttention, TransformerConfig};
 
 use wasm_chord_core::error::Error;
 

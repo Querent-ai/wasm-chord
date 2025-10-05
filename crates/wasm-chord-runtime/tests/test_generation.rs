@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 use wasm_chord_core::{GGUFParser, TensorLoader, Tokenizer};
-use wasm_chord_runtime::{Model, TransformerConfig};
+use wasm_chord_runtime::{GenerationConfig, Model, TransformerConfig};
 
 fn get_model_path() -> PathBuf {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -72,8 +72,10 @@ fn test_end_to_end_generation() {
     let prompt = "Hello";
     println!("\n🎲 Generating from prompt: {:?}", prompt);
 
+    let config = GenerationConfig { max_tokens: 10, temperature: 0.0, ..Default::default() };
+
     let start = std::time::Instant::now();
-    let generated = model.generate(prompt, &tokenizer, 10, 0.0, 1.0, 0).expect("Generation failed");
+    let generated = model.generate(prompt, &tokenizer, &config).expect("Generation failed");
     let duration = start.elapsed();
 
     println!("✅ Generation complete in {:?}", duration);
@@ -126,11 +128,13 @@ fn test_generation_with_temperature() {
     let prompt = "The quick brown";
 
     println!("\nGreedy (temperature=0.0):");
-    let greedy = model.generate(prompt, &tokenizer, 5, 0.0, 1.0, 0).expect("Generation failed");
+    let greedy_config = GenerationConfig { max_tokens: 5, temperature: 0.0, ..Default::default() };
+    let greedy = model.generate(prompt, &tokenizer, &greedy_config).expect("Generation failed");
     println!("  {:?}", greedy);
 
     println!("\nWith temperature=0.8:");
-    let warm = model.generate(prompt, &tokenizer, 5, 0.8, 1.0, 0).expect("Generation failed");
+    let warm_config = GenerationConfig { max_tokens: 5, temperature: 0.8, ..Default::default() };
+    let warm = model.generate(prompt, &tokenizer, &warm_config).expect("Generation failed");
     println!("  {:?}", warm);
 
     assert!(!greedy.is_empty());

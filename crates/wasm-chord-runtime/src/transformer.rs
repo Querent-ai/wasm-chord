@@ -569,6 +569,22 @@ impl TransformerLayer {
     }
 }
 
+/// Generation options
+#[derive(Debug, Clone)]
+pub struct GenerationConfig {
+    pub max_tokens: usize,
+    pub temperature: f32,
+    pub top_p: f32,
+    pub top_k: u32,
+    pub repetition_penalty: f32,
+}
+
+impl Default for GenerationConfig {
+    fn default() -> Self {
+        Self { max_tokens: 100, temperature: 0.7, top_p: 1.0, top_k: 0, repetition_penalty: 1.1 }
+    }
+}
+
 /// Complete transformer model with embeddings and output head
 pub struct Model {
     /// Model configuration
@@ -860,6 +876,31 @@ impl Model {
         Ok(logits)
     }
 
+    /// Apply repetition penalty to logits
+    ///
+    /// # Arguments
+    /// * `logits` - Logits to modify
+    /// * `tokens` - Previously generated tokens
+    /// * `penalty` - Repetition penalty (1.0 = no penalty, >1.0 = discourage repetition)
+    fn apply_repetition_penalty(&self, logits: &mut [f32], tokens: &[u32], penalty: f32) {
+        if penalty == 1.0 || tokens.is_empty() {
+            return;
+        }
+
+        for &token_id in tokens {
+            let idx = token_id as usize;
+            if idx < logits.len() {
+                // If logit is positive, divide by penalty (reduce it)
+                // If logit is negative, multiply by penalty (make it more negative)
+                if logits[idx] > 0.0 {
+                    logits[idx] /= penalty;
+                } else {
+                    logits[idx] *= penalty;
+                }
+            }
+        }
+    }
+
     /// Sample next token from logits
     ///
     /// # Arguments
@@ -938,15 +979,31 @@ impl Model {
             return Ok(indexed_probs[0].0 as u32);
         }
 
-        // Sample from filtered distribution
-        // For now, use weighted random (TODO: add RNG support)
-        // Using deterministic "sampling" based on max probability
-        let token_id = probs
+        // Sample from filtered distribution using true randomness
+        let mut rng = thread_rng();
+
+        // Convert probabilities to weights for weighted sampling
+        // Filter out zero probabilities for efficiency
+        let non_zero_probs: Vec<(usize, f64)> = probs
             .iter()
             .enumerate()
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(idx, _)| idx as u32)
-            .unwrap_or(0);
+            .filter(|(_, &p)| p > 0.0)
+            .map(|(idx, &p)| (idx, p as f64))
+            .collect();
+
+        if non_zero_probs.is_empty() {
+            // Fallback to greedy if all probs are zero
+            return Ok(indexed_probs[0].0 as u32);
+        }
+
+        let weights: Vec<f64> = non_zero_probs.iter().map(|(_, w)| *w).collect();
+        let indices: Vec<usize> = non_zero_probs.iter().map(|(i, _)| *i).collect();
+
+        let dist = WeightedIndex::new(&weights).map_err(|e| {
+            wasm_chord_core::error::Error::Runtime(format!("Weighted sampling failed: {}", e))
+        })?;
+        let sampled_idx = dist.sample(&mut rng);
+        let token_id = indices[sampled_idx] as u32;
 
         Ok(token_id)
     }
@@ -956,10 +1013,7 @@ impl Model {
     /// # Arguments
     /// * `prompt` - Input text prompt
     /// * `tokenizer` - Tokenizer for encoding/decoding
-    /// * `max_tokens` - Maximum number of tokens to generate
-    /// * `temperature` - Sampling temperature (0.0 = greedy)
-    /// * `top_p` - Nucleus sampling threshold
-    /// * `top_k` - Top-k sampling
+    /// * `config` - Generation configuration
     ///
     /// # Returns
     /// Generated text
@@ -967,11 +1021,13 @@ impl Model {
         &mut self,
         prompt: &str,
         tokenizer: &Tokenizer,
-        max_tokens: usize,
-        temperature: f32,
-        top_p: f32,
-        top_k: u32,
+        config: &GenerationConfig,
     ) -> Result<String> {
+        let max_tokens = config.max_tokens;
+        let temperature = config.temperature;
+        let top_p = config.top_p;
+        let top_k = config.top_k;
+        let repetition_penalty = config.repetition_penalty;
         use wasm_chord_core::error::Error;
 
         // Clear KV cache for new generation
@@ -1010,7 +1066,7 @@ impl Model {
             }
 
             // Get logits for the last position
-            let last_logits = &logits[(logits.len() - self.config.vocab_size)..];
+            let mut last_logits = logits[(logits.len() - self.config.vocab_size)..].to_vec();
 
             // Determine next token
             let next;
@@ -1020,6 +1076,9 @@ impl Model {
                 eprintln!("DEBUG: Forcing prompt token {}", next);
             } else {
                 // Past prompt - sample next token from logits
+                // Apply repetition penalty to discourage repeated tokens
+                self.apply_repetition_penalty(&mut last_logits, &tokens, repetition_penalty);
+
                 // Debug: show top 5 logits
                 let mut indexed_logits: Vec<(usize, f32)> =
                     last_logits.iter().copied().enumerate().collect();
@@ -1029,7 +1088,7 @@ impl Model {
                     &indexed_logits[..5.min(indexed_logits.len())]
                 );
 
-                next = self.sample(last_logits, temperature, top_p, top_k)?;
+                next = self.sample(&last_logits, temperature, top_p, top_k)?;
                 eprintln!("DEBUG: Sampled token {}", next);
 
                 // Check for EOS token

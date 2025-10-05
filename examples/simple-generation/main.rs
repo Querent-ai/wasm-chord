@@ -9,7 +9,7 @@
 use std::fs::File;
 use std::io::BufReader;
 use wasm_chord_core::{GGUFParser, TensorLoader, Tokenizer};
-use wasm_chord_runtime::{Model, TransformerConfig};
+use wasm_chord_runtime::{GenerationConfig, Model, TransformerConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🚀 WASM-Chord Simple Text Generation");
@@ -58,16 +58,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // === Generate Text ===
     let prompt = "The meaning of life is";
-    let max_tokens = 20; // Generate more tokens to see pattern
-    let temperature = 0.0; // Deterministic greedy sampling
+    let config = GenerationConfig {
+        max_tokens: 10,
+        temperature: 0.7,
+        top_p: 1.0,
+        top_k: 0,
+        repetition_penalty: 1.15,
+    };
 
     println!("🎲 Generating text...");
     println!("   Prompt: {:?}", prompt);
-    println!("   Max tokens: {}", max_tokens);
-    println!("   Temperature: {}", temperature);
+    println!("   Config: {:?}", config);
 
     let start = std::time::Instant::now();
-    let generated = model.generate(prompt, &tokenizer, max_tokens, temperature, 1.0, 0)?;
+    let generated = model.generate(prompt, &tokenizer, &config)?;
     let duration = start.elapsed();
 
     println!("\n✅ Generation complete in {:?}", duration);

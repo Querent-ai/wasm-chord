@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 use wasm_chord_core::{GGUFParser, TensorLoader, Tokenizer};
-use wasm_chord_runtime::{Model, TransformerConfig};
+use wasm_chord_runtime::{GenerationConfig, Model, TransformerConfig};
 
 fn get_model_path() -> PathBuf {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -87,7 +87,8 @@ fn test_minimal_generation() {
     // Check KV cache after clear (should be in generate())
     // We can't access internal state easily, so let's just run generate
 
-    let result = model.generate(prompt, &tokenizer, 10, 0.0, 1.0, 0).expect("Generation failed");
+    let config = GenerationConfig { max_tokens: 10, temperature: 0.0, ..Default::default() };
+    let result = model.generate(prompt, &tokenizer, &config).expect("Generation failed");
     println!("\n📝 Generated: {:?}", result);
 
     // Check if it's repetitive
