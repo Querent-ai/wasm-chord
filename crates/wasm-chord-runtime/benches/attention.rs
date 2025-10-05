@@ -27,7 +27,7 @@ fn bench_attention_computation(criterion: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("seq_len", seq_len), &seq_len, |bencher, _| {
             bencher.iter(|| {
-                attn.compute_attention(black_box(&q), black_box(&k), black_box(&v), seq_len)
+                attn.compute_attention(black_box(&q), black_box(&k), black_box(&v), seq_len, 0)
                     .unwrap();
             });
         });
@@ -70,7 +70,7 @@ fn bench_attention_gqa_ratios(criterion: &mut Criterion) {
             &ratio,
             |bencher, _| {
                 bencher.iter(|| {
-                    attn.compute_attention(black_box(&q), black_box(&k), black_box(&v), seq_len)
+                    attn.compute_attention(black_box(&q), black_box(&k), black_box(&v), seq_len, 0)
                         .unwrap();
                 });
             },

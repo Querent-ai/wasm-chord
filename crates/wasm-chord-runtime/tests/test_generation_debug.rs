@@ -87,14 +87,24 @@ fn debug_generation() {
     model.clear_kv_cache();
 
     let mut all_tokens = tokens.clone();
-    let position = 0;
 
     // Process prompt
-    let _logits = model.forward(&all_tokens, position).expect("Forward failed");
+    println!("  Prefill: {} tokens at position 0", all_tokens.len());
+    let prefill_logits = model.forward(&all_tokens, 0).expect("Forward failed");
+
+    // Sample first token from prefill
+    let last_logits = &prefill_logits[(prefill_logits.len() - model.config.vocab_size)..];
+    let first_token = model.sample(last_logits, 0.0, 1.0, 0).expect("Sampling failed");
+    let first_token_str = tokenizer.id_to_token(first_token).unwrap_or("<???>");
+    println!("  First token: [{}] {:?}", first_token, first_token_str);
+    all_tokens.push(first_token);
 
     for step in 0..10 {
         let last_token = *all_tokens.last().unwrap();
         let current_pos = all_tokens.len() - 1;
+
+        println!("\n  Step {}: Generating at position {}", step, current_pos);
+        println!("    Last token: [{}]", last_token);
 
         // Forward pass
         let logits = model.forward(&[last_token], current_pos).expect("Forward failed");

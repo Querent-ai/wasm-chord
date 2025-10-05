@@ -91,13 +91,15 @@ impl KVCache {
 
     pub fn append(&mut self, keys: &[f32], values: &[f32]) {
         let size = keys.len();
-        let start = self.seq_pos * size / self.keys.len() * self.max_size;
+        // Calculate position based on current cache state, not append count
+        let start = self.seq_pos;
         let end = start + size;
 
         if end <= self.max_size {
             self.keys[start..end].copy_from_slice(keys);
             self.values[start..end].copy_from_slice(values);
-            self.seq_pos += 1;
+            // Increment by number of elements added, not by 1
+            self.seq_pos += size;
         }
     }
 }
@@ -165,14 +167,17 @@ impl MultiHeadAttention {
         )?;
 
         // Apply RoPE (Rotary Position Embedding)
-        self.apply_rope(&mut q, position)?;
-        self.apply_rope(&mut k, position)?;
+        // NOTE: For now, using simplified RoPE that applies same position to all tokens in batch
+        // This is correct for seq_len=1 (incremental generation) but not ideal for prefill
+        self.apply_rope_simple(&mut q, position)?;
+        self.apply_rope_simple(&mut k, position)?;
 
         // Cache K, V
         kv_cache.append(&k, &v);
 
-        // Compute attention
-        let output = self.compute_attention(&q, &kv_cache.keys, &kv_cache.values, seq_len)?;
+        // Compute attention (pass position for correct causal masking)
+        let output =
+            self.compute_attention(&q, &kv_cache.keys, &kv_cache.values, seq_len, position)?;
 
         // Output projection
         let mut result = vec![0.0; seq_len * hidden_size];
@@ -181,9 +186,9 @@ impl MultiHeadAttention {
         Ok(result)
     }
 
-    fn apply_rope(&self, tensor: &mut [f32], position: usize) -> Result<()> {
-        // Simplified RoPE implementation
-        // TODO: Full RoPE with proper frequency computation
+    // Simplified RoPE: applies same position to all tokens in tensor
+    // Correct for seq_len=1, but not perfect for prefill (seq_len>1)
+    fn apply_rope_simple(&self, tensor: &mut [f32], position: usize) -> Result<()> {
         let head_dim = self.head_dim;
         let num_heads = tensor.len() / head_dim;
 
@@ -239,6 +244,7 @@ impl MultiHeadAttention {
         k: &[f32],
         v: &[f32],
         seq_len: usize,
+        position: usize,
     ) -> Result<Vec<f32>> {
         let head_dim = self.head_dim;
         let num_heads = self.config.num_heads;
@@ -280,8 +286,10 @@ impl MultiHeadAttention {
                     // Scale by sqrt(head_dim)
                     scores[j] = score * scale;
 
-                    // Causal masking: can only attend to previous positions
-                    if j > i {
+                    // Causal masking: can only attend to positions up to current absolute position
+                    // For incremental generation: position + i is the absolute position of query token
+                    let query_abs_pos = position + i;
+                    if j > query_abs_pos {
                         scores[j] = f32::NEG_INFINITY;
                     }
                 }
@@ -690,6 +698,14 @@ impl Model {
         let seq_len = token_ids.len();
         let hidden_size = self.config.hidden_size;
 
+        let debug = std::env::var("DEBUG_FORWARD").is_ok();
+        if debug {
+            eprintln!(
+                "🔍 Forward: seq_len={}, position={}, tokens={:?}",
+                seq_len, position, token_ids
+            );
+        }
+
         // 1. Embed tokens
         let mut hidden_states = vec![0.0; seq_len * hidden_size];
         for (i, &token_id) in token_ids.iter().enumerate() {
@@ -702,6 +718,11 @@ impl Model {
                 hidden_states[out_start..out_end]
                     .copy_from_slice(&self.token_embeddings[emb_start..emb_end]);
             }
+        }
+
+        if debug {
+            let sum: f32 = hidden_states.iter().take(10).sum();
+            eprintln!("  Embeddings sum(first 10): {:.6}", sum);
         }
 
         // 2. Pass through transformer layers
@@ -846,17 +867,28 @@ impl Model {
             return Err(Error::ParseError("Empty token sequence".to_string()));
         }
 
-        // Process prompt (prefill)
-        let _logits = self.forward(&tokens, 0)?;
-        let position = tokens.len();
+        // Process prompt (prefill) - this fills the KV cache for positions 0..tokens.len()-1
+        let prefill_logits = self.forward(&tokens, 0)?;
 
-        // Generate tokens one by one
-        for _ in 0..max_tokens {
-            // Get last token
+        // Get logits for the last token of the prompt
+        let last_logits = &prefill_logits[(prefill_logits.len() - self.config.vocab_size)..];
+
+        // Sample first generated token from prompt logits
+        let first_token = self.sample(last_logits, temperature, top_p, top_k)?;
+        if first_token == tokenizer.special_tokens().eos_token_id {
+            return tokenizer.decode(&tokens, true);
+        }
+        tokens.push(first_token);
+
+        // Generate remaining tokens one by one
+        for _ in 1..max_tokens {
+            // Get last generated token
             let last_token = *tokens.last().unwrap();
+            // Position for this new token (KV cache already has 0..tokens.len()-1)
+            let current_position = tokens.len() - 1;
 
-            // Forward pass for single token
-            let logits = self.forward(&[last_token], position + tokens.len() - 1)?;
+            // Forward pass for single token at current position
+            let logits = self.forward(&[last_token], current_position)?;
 
             // Get logits for last position
             let last_logits = &logits[(logits.len() - self.config.vocab_size)..];
@@ -1118,7 +1150,7 @@ mod tests {
         let k = vec![0.2; seq_len * config.num_kv_heads * head_dim];
         let v = vec![0.3; seq_len * config.num_kv_heads * head_dim];
 
-        let result = attention.compute_attention(&q, &k, &v, seq_len);
+        let result = attention.compute_attention(&q, &k, &v, seq_len, 0);
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -1171,7 +1203,7 @@ mod tests {
             }
         }
 
-        let result = attention.compute_attention(&q, &k, &v, seq_len).unwrap();
+        let result = attention.compute_attention(&q, &k, &v, seq_len, 0).unwrap();
 
         // Check that output shape is correct
         assert_eq!(result.len(), seq_len * config.num_heads * head_dim);
@@ -1206,7 +1238,7 @@ mod tests {
         let k = vec![0.5; seq_len * config.num_kv_heads * head_dim];
         let v = vec![2.0; seq_len * config.num_kv_heads * head_dim];
 
-        let result = attention.compute_attention(&q, &k, &v, seq_len);
+        let result = attention.compute_attention(&q, &k, &v, seq_len, 0);
 
         assert!(result.is_ok());
         let output = result.unwrap();
