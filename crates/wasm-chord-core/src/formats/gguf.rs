@@ -159,9 +159,17 @@ impl<R: Read + Seek> GGUFParser<R> {
         Ok(meta)
     }
 
-    /// Get current position for tensor data
+    /// Get current position for tensor data (aligned to 32 bytes)
     pub fn tensor_data_offset(&mut self) -> Result<u64> {
-        self.reader.stream_position().map_err(Error::from)
+        const GGUF_DEFAULT_ALIGNMENT: u64 = 32;
+
+        let current_pos = self.reader.stream_position().map_err(Error::from)?;
+
+        // Align to 32-byte boundary
+        let aligned_pos =
+            (current_pos + GGUF_DEFAULT_ALIGNMENT - 1) & !(GGUF_DEFAULT_ALIGNMENT - 1);
+
+        Ok(aligned_pos)
     }
 
     /// Read tensor data chunk
@@ -406,7 +414,6 @@ impl<R: Read + Seek> GGUFParser<R> {
 
     fn parse_tensor_info(&mut self, count: u64) -> Result<Vec<TensorDesc>> {
         let mut tensors = Vec::new();
-        let mut current_offset = 0u64;
 
         for _ in 0..count {
             let name = self.read_string()?;
@@ -428,9 +435,9 @@ impl<R: Read + Seek> GGUFParser<R> {
             let offset = self.read_u64()?;
 
             let shape = Shape::new(dims);
-            let desc = TensorDesc::new(name, dtype, shape, current_offset + offset)?;
+            // Use offset directly as read from file - it's already relative to tensor_data
+            let desc = TensorDesc::new(name, dtype, shape, offset)?;
 
-            current_offset += desc.size_bytes as u64;
             tensors.push(desc);
         }
 
