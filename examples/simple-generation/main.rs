@@ -57,8 +57,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ Weights loaded\n");
 
     // === Generate Text ===
-    let prompt = "Hello";
-    let max_tokens = 3; // Just a few tokens for comparison
+    let prompt = "The meaning of life is";
+    let max_tokens = 20; // Generate more tokens to see pattern
     let temperature = 0.0; // Deterministic greedy sampling
 
     println!("🎲 Generating text...");

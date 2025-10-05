@@ -2,6 +2,8 @@
 //!
 //! Implements the core transformer components for LLM inference.
 
+use rand::distributions::{Distribution, WeightedIndex};
+use rand::thread_rng;
 use wasm_chord_core::error::Result;
 use wasm_chord_core::Tokenizer;
 use wasm_chord_cpu::matmul_f32;
@@ -177,10 +179,12 @@ impl MultiHeadAttention {
                 kv_cache.seq_pos,
                 k.len()
             );
+            eprintln!("    K values being added (first 5): {:?}", &k[..k.len().min(5)]);
         }
         kv_cache.append(&k, &v);
         if std::env::var("DEBUG_KV").is_ok() {
             eprintln!("  After append: kv_cache.seq_pos={}", kv_cache.seq_pos);
+            eprintln!("    Cache K values (first 5): {:?}", &kv_cache.keys[..5]);
         }
 
         // Compute attention (pass position for correct causal masking)
@@ -358,6 +362,14 @@ impl MultiHeadAttention {
                     for score in &mut exp_scores {
                         *score /= sum_exp;
                     }
+                }
+
+                // Debug: show attention weights for first head, first query
+                if std::env::var("DEBUG_ATTN_WEIGHTS").is_ok() && h == 0 && i == 0 {
+                    eprintln!(
+                        "  Attention weights (head 0, query 0): {:?}",
+                        &exp_scores[..kv_seq_len.min(5)]
+                    );
                 }
 
                 // Weighted sum of values
@@ -821,7 +833,19 @@ impl Model {
         // 2. Pass through transformer layers
         for layer_idx in 0..self.config.num_layers {
             let kv_cache = &mut self.kv_caches[layer_idx];
+            if std::env::var("DEBUG_KV").is_ok() {
+                eprintln!(
+                    "🔍 Layer {}, pos={}, kv_cache.seq_pos BEFORE layer={}",
+                    layer_idx, position, kv_cache.seq_pos
+                );
+            }
             hidden_states = self.layers[layer_idx].forward(&hidden_states, kv_cache, position)?;
+            if std::env::var("DEBUG_KV").is_ok() {
+                eprintln!(
+                    "✅ Layer {}, pos={}, kv_cache.seq_pos AFTER layer={}",
+                    layer_idx, position, kv_cache.seq_pos
+                );
+            }
         }
 
         // 3. Final normalization
