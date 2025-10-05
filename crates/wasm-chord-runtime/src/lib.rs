@@ -39,6 +39,7 @@ impl From<Error> for ErrorCode {
             Error::ParseError(_) | Error::InvalidFormat(_) => ErrorCode::ModelParseError,
             Error::BackendError(_) => ErrorCode::BackendUnsupported,
             Error::Io(_) => ErrorCode::IoError,
+            Error::Runtime(_) => ErrorCode::GenericFailure,
             Error::Unknown(_) => ErrorCode::GenericFailure,
         }
     }

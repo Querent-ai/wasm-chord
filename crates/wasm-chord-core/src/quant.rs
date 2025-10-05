@@ -31,10 +31,78 @@ pub struct BlockQ8_0 {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct BlockQ4_K {
-    pub d: u16,           // f16 super-block scale (stored as u16)
-    pub dmin: u16,        // f16 super-block min scale (stored as u16)
-    pub scales: [u8; 12], // Quantized scales (6 bits each)
+    pub d: u16,             // f16 super-block scale (stored as u16)
+    pub dmin: u16,          // f16 super-block min scale (stored as u16)
+    pub scales: [u8; 12],   // Quantized scales (6 bits each)
     pub qs: [u8; QK_K / 2], // 128 bytes of 4-bit quants
+}
+
+/// Helper function to extract scale and min from Q4_K scales array
+/// Based on ggml get_scale_min_k4
+#[inline]
+fn get_scale_min_k4(j: usize, scales: &[u8; 12]) -> (u8, u8) {
+    let (d, m) = if j < 4 {
+        (scales[j] & 63, scales[j + 4] & 63)
+    } else {
+        (
+            (scales[j + 4] & 0xF) | ((scales[j - 4] >> 6) << 4),
+            (scales[j + 4] >> 4) | ((scales[j] >> 6) << 4),
+        )
+    };
+    (d, m)
+}
+
+/// Dequantize Q4_K block to f32
+/// Q4_K uses 256-element super-blocks with hierarchical scaling
+/// Based on ggml dequantize_row_q4_K implementation
+pub fn dequantize_q4_k(block: &BlockQ4_K, output: &mut [f32]) -> Result<()> {
+    if output.len() != QK_K {
+        return Err(Error::InvalidShape(format!("Output buffer must be {} elements", QK_K)));
+    }
+
+    // Convert f16 scales to f32
+    let d = half::f16::from_bits(block.d).to_f32();
+    let min = half::f16::from_bits(block.dmin).to_f32();
+
+    // Process 256 elements in groups of 64
+    // Each group uses 2 scales (one for lower nibbles, one for upper)
+    let mut y_idx = 0;
+    let mut q_idx = 0;
+    let mut is = 0; // scale index
+
+    for _ in 0..4 {
+        // Get scales for lower and upper nibbles
+        let (sc0, m0) = get_scale_min_k4(is, &block.scales);
+        let (sc1, m1) = get_scale_min_k4(is + 1, &block.scales);
+
+        // Scales are stored as: ls = round((63 / max_scale) * scale)
+        // So to dequantize: scale = (ls / 63) * max_scale = (d / 63) * ls
+        let d1 = (d / 63.0) * sc0 as f32;
+        let m1_val = (min / 63.0) * m0 as f32;
+        let d2 = (d / 63.0) * sc1 as f32;
+        let m2 = (min / 63.0) * m1 as f32;
+
+        // Dequantize 32 lower nibbles
+        for _ in 0..32 {
+            let q = block.qs[q_idx];
+            output[y_idx] = d1 * (q & 0xF) as f32 - m1_val;
+            y_idx += 1;
+            q_idx += 1;
+        }
+
+        // Dequantize 32 upper nibbles (from same bytes)
+        q_idx -= 32; // Go back to same bytes
+        for _ in 0..32 {
+            let q = block.qs[q_idx];
+            output[y_idx] = d2 * (q >> 4) as f32 - m2;
+            y_idx += 1;
+            q_idx += 1;
+        }
+
+        is += 2;
+    }
+
+    Ok(())
 }
 
 /// Q6_K block: 256 6-bit values in a super-block
@@ -161,6 +229,7 @@ pub fn get_block_size(dtype: DataType) -> Option<usize> {
     match dtype {
         DataType::Q4_0 | DataType::Q4_1 => Some(Q4_BLOCK_SIZE),
         DataType::Q8_0 | DataType::Q8_1 => Some(Q8_BLOCK_SIZE),
+        DataType::Q4_K => Some(QK_K),
         DataType::Q6_K => Some(QK_K),
         _ => None,
     }
@@ -195,6 +264,31 @@ mod tests {
         dequantize_q8_0(&block, &mut output).unwrap();
 
         assert_eq!(output[0], 10.0 * 0.25);
+    }
+
+    #[test]
+    fn test_q4_k_dequant() {
+        // Create a simple Q4_K block
+        let block = BlockQ4_K {
+            d: half::f16::from_f32(1.0).to_bits(),
+            dmin: half::f16::from_f32(0.5).to_bits(),
+            scales: [0x11; 12],   // Simple pattern for testing
+            qs: [0x50; QK_K / 2], // 5 in lower nibble, 0 in upper
+        };
+
+        let mut output = [0.0f32; QK_K];
+        dequantize_q4_k(&block, &mut output).unwrap();
+
+        // Check that we don't have inf/nan
+        let has_nan = output.iter().any(|&x| x.is_nan());
+        let has_inf = output.iter().any(|&x| x.is_infinite());
+        assert!(!has_nan, "Q4_K dequantization produced NaN");
+        assert!(!has_inf, "Q4_K dequantization produced inf");
+
+        // Check reasonable value ranges (4-bit values are 0-15, with scaling)
+        for (i, &val) in output.iter().enumerate() {
+            assert!(val.abs() <= 100.0, "Value at index {} is out of range: {}", i, val);
+        }
     }
 
     #[test]

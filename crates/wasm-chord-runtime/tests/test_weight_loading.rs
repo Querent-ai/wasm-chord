@@ -11,7 +11,12 @@ fn get_model_path() -> PathBuf {
     path.pop(); // Go to crates/
     path.pop(); // Go to workspace root
 
-    // Try Q4_K_M first (proper format with scales), fallback to Q4_0
+    // Try Q8_0 first (simpler, should work), then Q4_K_M, fallback to Q4_0
+    let q8_path = path.join("models/tinyllama-q8.gguf");
+    if q8_path.exists() {
+        return q8_path;
+    }
+
     let q4km_path = path.join("models/tinyllama-q4km.gguf");
     if q4km_path.exists() {
         q4km_path

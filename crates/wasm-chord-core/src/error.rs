@@ -24,6 +24,9 @@ pub enum Error {
     #[error("Backend error: {0}")]
     BackendError(String),
 
+    #[error("Runtime error: {0}")]
+    Runtime(String),
+
     #[error("Unknown error: {0}")]
     Unknown(String),
 }

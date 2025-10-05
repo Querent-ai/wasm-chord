@@ -5,7 +5,8 @@
 use crate::error::{Error, Result};
 use crate::formats::gguf::GGUFParser;
 use crate::quant::{
-    dequantize_q4_0, dequantize_q6_k, dequantize_q8_0, BlockQ4_0, BlockQ6_K, BlockQ8_0,
+    dequantize_q4_0, dequantize_q4_k, dequantize_q6_k, dequantize_q8_0, BlockQ4_0, BlockQ4_K,
+    BlockQ6_K, BlockQ8_0,
 };
 use crate::tensor::{DataType, TensorDesc};
 use std::collections::HashMap;
@@ -95,6 +96,10 @@ impl TensorLoader {
             DataType::Q8_0 => {
                 // Dequantize Q8_0
                 self.dequantize_q8_0(&raw_data, metadata.desc.element_count())?
+            }
+            DataType::Q4_K => {
+                // Dequantize Q4_K
+                self.dequantize_q4_k(&raw_data, metadata.desc.element_count())?
             }
             DataType::Q6_K => {
                 // Dequantize Q6_K
@@ -297,6 +302,76 @@ impl TensorLoader {
                             block.qh[0]
                         );
                     }
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn dequantize_q4_k(&self, data: &[u8], element_count: usize) -> Result<Vec<f32>> {
+        const BLOCK_SIZE: usize = std::mem::size_of::<BlockQ4_K>();
+        const QK_K: usize = 256;
+        let mut result = vec![0.0f32; element_count];
+
+        static FIRST_CALL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+        if FIRST_CALL.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            eprintln!(
+                "Q4_K dequant: BLOCK_SIZE={}, data.len()={}, element_count={}, expected_blocks={}",
+                BLOCK_SIZE,
+                data.len(),
+                element_count,
+                element_count / QK_K
+            );
+        }
+
+        for (block_idx, block_bytes) in data.chunks_exact(BLOCK_SIZE).enumerate() {
+            // Debug first block raw bytes
+            if block_idx == 0 {
+                eprintln!("  First Q4_K block raw bytes (first 20):");
+                eprint!("    ");
+                for (i, &byte) in block_bytes.iter().take(20).enumerate() {
+                    eprint!("{:02x} ", byte);
+                    if i == 1 {
+                        eprint!("| "); // After d (2 bytes)
+                    } else if i == 3 {
+                        eprint!("| "); // After dmin (2 bytes)
+                    } else if i == 15 {
+                        eprint!("| "); // After scales (12 bytes)
+                    }
+                }
+                eprintln!();
+
+                // Show d and dmin as raw u16 values
+                let d_bytes = [block_bytes[0], block_bytes[1]];
+                let dmin_bytes = [block_bytes[2], block_bytes[3]];
+                let d_raw = u16::from_le_bytes(d_bytes);
+                let dmin_raw = u16::from_le_bytes(dmin_bytes);
+                eprintln!("    d_raw={:#06x}, dmin_raw={:#06x}", d_raw, dmin_raw);
+            }
+
+            let block: BlockQ4_K = unsafe { std::ptr::read(block_bytes.as_ptr() as *const _) };
+
+            let offset = block_idx * QK_K;
+            let result_len = result.len();
+            let end = (offset + QK_K).min(result_len);
+            if offset < result_len {
+                dequantize_q4_k(&block, &mut result[offset..end])?;
+
+                // Debug first block
+                if block_idx == 0 {
+                    let has_nan = result[offset..end].iter().any(|&x| x.is_nan());
+                    let has_inf = result[offset..end].iter().any(|&x| x.is_infinite());
+                    eprintln!(
+                        "  First Q4_K block: d={}, dmin={}, nan={}, inf={}",
+                        half::f16::from_bits(block.d).to_f32(),
+                        half::f16::from_bits(block.dmin).to_f32(),
+                        has_nan,
+                        has_inf
+                    );
+                    eprintln!("  scales[0]={:#x}, qs[0]={:#x}", block.scales[0], block.qs[0]);
+                    let end_idx = (offset + 10).min(result_len);
+                    eprintln!("  First 10 dequantized values: {:?}", &result[offset..end_idx]);
                 }
             }
         }
