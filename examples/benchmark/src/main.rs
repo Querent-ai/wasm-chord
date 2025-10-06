@@ -72,8 +72,7 @@ fn benchmark_gpu_matmul(m: usize, k: usize, n: usize) -> Result<f64> {
 
 fn calculate_gflops(m: usize, k: usize, n: usize, time_ms: f64) -> f64 {
     let operations = 2.0 * m as f64 * k as f64 * n as f64; // 2 * M * K * N for matmul
-    let gflops = (operations / 1e9) / (time_ms / 1000.0);
-    gflops
+    (operations / 1e9) / (time_ms / 1000.0)
 }
 
 fn main() -> Result<()> {
@@ -129,7 +128,9 @@ fn main() -> Result<()> {
     #[cfg(not(feature = "gpu"))]
     {
         println!("\n💡 Tip: Run with --features gpu to benchmark GPU performance:");
-        println!("   cargo run --release --features gpu --manifest-path examples/benchmark/Cargo.toml");
+        println!(
+            "   cargo run --release --features gpu --manifest-path examples/benchmark/Cargo.toml"
+        );
     }
 
     println!("\n✅ Benchmark complete!");

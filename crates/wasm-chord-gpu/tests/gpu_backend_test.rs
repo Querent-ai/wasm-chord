@@ -34,8 +34,8 @@ fn test_gpu_matmul_large() {
         let a = vec![1.0; size * size];
         let b = vec![2.0; size * size];
 
-        let result = gpu.matmul(&a, &b, size as u32, size as u32, size as u32)
-            .expect("Matmul failed");
+        let result =
+            gpu.matmul(&a, &b, size as u32, size as u32, size as u32).expect("Matmul failed");
 
         // Each element should be size * 1.0 * 2.0
         assert_eq!(result.len(), size * size);
@@ -59,7 +59,9 @@ fn test_gpu_matmul_identity() {
             identity[i * size + i] = 1.0;
         }
 
-        let data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0];
+        let data = vec![
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
+        ];
 
         let result = gpu.matmul(&data, &identity, 4, 4, 4).expect("Matmul failed");
 
@@ -82,8 +84,8 @@ fn test_gpu_performance_matmul() {
         let b = vec![2.0; size * size];
 
         let start = std::time::Instant::now();
-        let _result = gpu.matmul(&a, &b, size as u32, size as u32, size as u32)
-            .expect("Matmul failed");
+        let _result =
+            gpu.matmul(&a, &b, size as u32, size as u32, size as u32).expect("Matmul failed");
         let duration = start.elapsed();
 
         println!("GPU matmul 256x256 took: {:?}", duration);
@@ -145,8 +147,8 @@ fn test_gpu_multiple_matmuls() {
         let size = 32;
         let e = vec![1.0; size * size];
         let f = vec![2.0; size * size];
-        let result3 = gpu.matmul(&e, &f, size as u32, size as u32, size as u32)
-            .expect("Matmul 3 failed");
+        let result3 =
+            gpu.matmul(&e, &f, size as u32, size as u32, size as u32).expect("Matmul 3 failed");
         assert_eq!(result3.len(), size * size);
     });
 }

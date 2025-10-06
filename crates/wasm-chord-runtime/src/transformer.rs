@@ -1039,7 +1039,8 @@ impl Model {
 
         // 4. Project to vocabulary (LM head)
         let vocab_size = self.config.vocab_size;
-        let logits = self.matmul(&hidden_states, &self.lm_head, seq_len, hidden_size, vocab_size)?;
+        let logits =
+            self.matmul(&hidden_states, &self.lm_head, seq_len, hidden_size, vocab_size)?;
 
         Ok(logits)
     }
