@@ -82,11 +82,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Build examples
+      - name: Build examples (CPU only)
         run: |
           cargo build --release --manifest-path examples/simple-generation/Cargo.toml
           cargo build --release --manifest-path examples/chat/Cargo.toml
           cargo build --release --manifest-path examples/chat-streaming/Cargo.toml
+          cargo build --release --manifest-path examples/benchmark/Cargo.toml
+
+      - name: Build examples (with GPU feature)
+        run: |
+          cargo build --release --features gpu --manifest-path examples/gpu-generation/Cargo.toml
+          cargo build --release --features gpu --manifest-path examples/benchmark/Cargo.toml
 
   docs:
     name: Documentation

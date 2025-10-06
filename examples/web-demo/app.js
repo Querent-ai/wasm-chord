@@ -41,12 +41,29 @@ async function initWasm() {
 async function loadModel() {
     const file = modelFile.files[0];
     if (!file) {
-        alert('Please select a model file');
+        statusEl.textContent = 'Please select a model file';
+        statusEl.style.color = '#f44336';
         return;
+    }
+
+    // Validate file extension
+    if (!file.name.endsWith('.gguf')) {
+        statusEl.textContent = 'Invalid file - must be a .gguf model file';
+        statusEl.style.color = '#f44336';
+        return;
+    }
+
+    // Check file size (warn if > 2GB)
+    const fileSizeMB = file.size / 1024 / 1024;
+    if (fileSizeMB > 2048) {
+        if (!confirm(`Large model file (${fileSizeMB.toFixed(0)} MB). This may cause out-of-memory errors. Continue?`)) {
+            return;
+        }
     }
 
     try {
         statusEl.textContent = 'Loading model...';
+        statusEl.style.color = '';
         loadProgress.style.display = 'block';
         progressText.textContent = 'Reading file...';
         loadBtn.disabled = true;
@@ -55,29 +72,48 @@ async function loadModel() {
         const arrayBuffer = await file.arrayBuffer();
         const bytes = new Uint8Array(arrayBuffer);
 
-        progressText.textContent = 'Initializing model...';
-        
-        // Load model
+        progressText.textContent = `Initializing model (${fileSizeMB.toFixed(1)} MB)...`;
+
+        // Load model with timeout detection
+        const loadTimeout = setTimeout(() => {
+            progressText.textContent = 'This is taking longer than expected...';
+        }, 5000);
+
         model = new WasmModel(bytes);
-        
+        clearTimeout(loadTimeout);
+
         // Set default config
         updateModelConfig();
 
         statusEl.textContent = 'Model loaded ✓';
-        modelInfoEl.textContent = `${file.name} (${(bytes.length / 1024 / 1024).toFixed(1)} MB)`;
+        statusEl.style.color = '#4caf50';
+        modelInfoEl.textContent = `${file.name} (${fileSizeMB.toFixed(1)} MB)`;
         loadProgress.style.display = 'none';
 
         // Enable chat
         userInput.disabled = false;
         sendBtn.disabled = false;
         clearBtn.disabled = false;
-        
+
         addMessage('assistant', 'Hello! I\'m ready to chat. How can I help you today?');
 
     } catch (error) {
         console.error('Failed to load model:', error);
-        statusEl.textContent = 'Error loading model';
-        alert('Failed to load model: ' + error.message);
+
+        // Provide user-friendly error messages
+        let errorMsg = 'Failed to load model';
+        if (error.message.includes('memory')) {
+            errorMsg = 'Out of memory - try a smaller model or close other tabs';
+        } else if (error.message.includes('parse') || error.message.includes('invalid')) {
+            errorMsg = 'Invalid or corrupted model file';
+        } else if (error.message) {
+            errorMsg = `Error: ${error.message}`;
+        }
+
+        statusEl.textContent = errorMsg;
+        statusEl.style.color = '#f44336';
+        progressText.textContent = errorMsg;
+
         loadProgress.style.display = 'none';
         loadBtn.disabled = false;
     }
@@ -159,10 +195,17 @@ async function sendMessage() {
         // Generate with streaming
         let assistantResponse = '';
         const startTime = Date.now();
+        let tokenCount = 0;
+
+        // Set generation timeout (30 seconds)
+        const generationTimeout = setTimeout(() => {
+            console.warn('Generation is taking longer than expected');
+        }, 30000);
 
         await model.generate_stream(prompt, (tokenText) => {
             assistantResponse += tokenText;
-            
+            tokenCount++;
+
             // Update the last message
             removeTypingIndicator();
             const lastMsg = messagesEl.lastElementChild;
@@ -171,21 +214,42 @@ async function sendMessage() {
             } else {
                 addMessage('assistant', assistantResponse);
             }
-            
+
             messagesEl.scrollTop = messagesEl.scrollHeight;
             return true; // Continue generation
         });
 
+        clearTimeout(generationTimeout);
+
         const duration = (Date.now() - startTime) / 1000;
-        console.log(`Generation took ${duration.toFixed(1)}s`);
+        const tokensPerSec = tokenCount / duration;
+        console.log(`Generation: ${tokenCount} tokens in ${duration.toFixed(1)}s (${tokensPerSec.toFixed(1)} tokens/s)`);
 
         // Add to history
         conversationHistory.push({ role: 'assistant', content: assistantResponse });
 
+        // Warn if generation was very slow
+        if (tokensPerSec < 0.5) {
+            console.warn('Generation is slow. Consider using a smaller model or enabling GPU acceleration.');
+        }
+
     } catch (error) {
         console.error('Generation failed:', error);
         removeTypingIndicator();
-        addMessage('assistant', 'Sorry, an error occurred during generation.');
+
+        // Provide user-friendly error messages
+        let errorMsg = 'Sorry, an error occurred during generation.';
+        if (error.message.includes('memory')) {
+            errorMsg = 'Out of memory during generation. Try reducing max tokens or using a smaller model.';
+        } else if (error.message.includes('timeout')) {
+            errorMsg = 'Generation timed out. Try again or reduce max tokens.';
+        } else if (error.message) {
+            errorMsg = `Generation error: ${error.message}`;
+        }
+
+        addMessage('assistant', errorMsg);
+        statusEl.textContent = 'Generation failed';
+        statusEl.style.color = '#f44336';
     } finally {
         // Re-enable input
         userInput.disabled = false;
