@@ -3,367 +3,64 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>wasm-chord Demo</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-
-        .container {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            max-width: 800px;
-            width: 100%;
-            padding: 40px;
-        }
-
-        h1 {
-            color: #333;
-            margin-bottom: 10px;
-            font-size: 32px;
-        }
-
-        .subtitle {
-            color: #666;
-            margin-bottom: 30px;
-            font-size: 14px;
-        }
-
-        .status {
-            background: #f0f0f0;
-            padding: 12px 16px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-            font-size: 14px;
-            color: #555;
-        }
-
-        .status.ready {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .status.loading {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .status.error {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .input-group {
-            margin-bottom: 20px;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #333;
-        }
-
-        textarea, input[type="file"] {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #ddd;
-            border-radius: 6px;
-            font-family: inherit;
-            font-size: 14px;
-            transition: border-color 0.2s;
-        }
-
-        textarea:focus, input[type="file"]:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
-        textarea {
-            resize: vertical;
-            min-height: 100px;
-        }
-
-        button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-        }
-
-        button:active {
-            transform: translateY(0);
-        }
-
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .output {
-            background: #f8f9fa;
-            border: 2px solid #e9ecef;
-            border-radius: 6px;
-            padding: 16px;
-            min-height: 150px;
-            margin-top: 20px;
-            font-family: 'Courier New', monospace;
-            font-size: 14px;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }
-
-        .output.streaming {
-            border-color: #667eea;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { border-color: #667eea; }
-            50% { border-color: #764ba2; }
-        }
-
-        .info {
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #e9ecef;
-            font-size: 12px;
-            color: #666;
-        }
-
-        .info h3 {
-            margin-bottom: 10px;
-            color: #333;
-        }
-
-        .info code {
-            background: #f0f0f0;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-family: 'Courier New', monospace;
-        }
-    </style>
+    <title>WASM-Chord Chat Demo</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <h1>🎵 wasm-chord</h1>
-        <div class="subtitle">WebAssembly LLM Inference Runtime - Demo</div>
+        <header>
+            <h1>🎵 WASM-Chord Chat</h1>
+            <p class="subtitle">Privacy-first LLM inference in your browser</p>
+        </header>
 
-        <div id="status" class="status loading">
-            Initializing runtime...
+        <div class="status-bar">
+            <span id="status">Not loaded</span>
+            <span id="model-info"></span>
         </div>
 
-        <div class="input-group">
-            <label for="modelFile">Load Model (GGUF format)</label>
-            <input type="file" id="modelFile" accept=".gguf,.bin" />
+        <div class="chat-container">
+            <div id="chat-messages" class="messages"></div>
         </div>
 
-        <div class="input-group">
-            <label for="prompt">Prompt</label>
-            <textarea id="prompt" placeholder="Enter your prompt here...">Hello, how are you?</textarea>
+        <div class="input-container">
+            <textarea
+                id="user-input"
+                placeholder="Type your message here..."
+                rows="3"
+                disabled
+            ></textarea>
+            <button id="send-btn" disabled>Send</button>
+            <button id="clear-btn" disabled>Clear</button>
         </div>
 
-        <div class="input-group">
-            <label>Generation Options</label>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px;">
-                <div>
-                    <small>Max Tokens: <span id="maxTokensVal">512</span></small>
-                    <input type="range" id="maxTokens" min="1" max="2048" value="512" style="width: 100%;">
-                </div>
-                <div>
-                    <small>Temperature: <span id="temperatureVal">0.7</span></small>
-                    <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7" style="width: 100%;">
-                </div>
+        <div class="config-panel">
+            <h3>⚙️ Generation Settings</h3>
+            <div class="config-grid">
+                <label>
+                    Max Tokens: <span id="max-tokens-val">50</span>
+                    <input type="range" id="max-tokens" min="10" max="200" value="50">
+                </label>
+                <label>
+                    Temperature: <span id="temperature-val">0.7</span>
+                    <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.7">
+                </label>
             </div>
         </div>
 
-        <button id="generateBtn" disabled>Generate (Stream)</button>
-        <button id="generateBlockingBtn" disabled style="margin-left: 10px;">Generate (Blocking)</button>
-
-        <div id="output" class="output">Output will appear here...</div>
-
-        <div class="info">
-            <h3>System Info</h3>
-            <div id="sysInfo">Checking capabilities...</div>
+        <div class="load-section">
+            <h3>📦 Load Model</h3>
+            <input type="file" id="model-file" accept=".gguf">
+            <button id="load-btn">Load Model</button>
+            <div id="load-progress" style="display: none;">
+                <span id="progress-text">Loading...</span>
+            </div>
         </div>
+
+        <footer>
+            <p>Built with wasm-chord | <span id="version"></span></p>
+        </footer>
     </div>
 
-    <script type="module">
-        // Placeholder for actual wasm-chord integration
-        // In production, this would import the compiled wasm module
-
-        let runtime = null;
-        let model = null;
-
-        async function init() {
-            const statusEl = document.getElementById('status');
-            const sysInfoEl = document.getElementById('sysInfo');
-
-            try {
-                // Check capabilities
-                const hasWebGPU = 'gpu' in navigator;
-                const hasMemory64 = await checkMemory64();
-
-                sysInfoEl.innerHTML = `
-                    <div>WebGPU: <code>${hasWebGPU ? '✅ Available' : '❌ Not Available'}</code></div>
-                    <div>Memory64: <code>${hasMemory64 ? '✅ Supported' : '❌ Not Supported'}</code></div>
-                    <div>SIMD: <code>✅ Assumed Available</code></div>
-                `;
-
-                // Initialize runtime (placeholder)
-                // runtime = await WasmChord.init({ gpuEnabled: hasWebGPU });
-
-                statusEl.textContent = 'Runtime initialized. Load a model to begin.';
-                statusEl.className = 'status ready';
-
-            } catch (err) {
-                statusEl.textContent = `Initialization error: ${err.message}`;
-                statusEl.className = 'status error';
-            }
-        }
-
-        async function checkMemory64() {
-            try {
-                new WebAssembly.Memory({ initial: 1, maximum: 1, address: 'i64' });
-                return true;
-            } catch {
-                return false;
-            }
-        }
-
-        // Event listeners
-        document.getElementById('modelFile').addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            const statusEl = document.getElementById('status');
-            statusEl.textContent = `Loading model: ${file.name}...`;
-            statusEl.className = 'status loading';
-
-            try {
-                // model = await runtime.loadModel(file);
-                // Placeholder: simulate success
-                await new Promise(resolve => setTimeout(resolve, 1000));
-
-                statusEl.textContent = `Model loaded: ${file.name}`;
-                statusEl.className = 'status ready';
-
-                document.getElementById('generateBtn').disabled = false;
-                document.getElementById('generateBlockingBtn').disabled = false;
-
-            } catch (err) {
-                statusEl.textContent = `Model load error: ${err.message}`;
-                statusEl.className = 'status error';
-            }
-        });
-
-        document.getElementById('maxTokens').addEventListener('input', (e) => {
-            document.getElementById('maxTokensVal').textContent = e.target.value;
-        });
-
-        document.getElementById('temperature').addEventListener('input', (e) => {
-            document.getElementById('temperatureVal').textContent = e.target.value;
-        });
-
-        document.getElementById('generateBtn').addEventListener('click', async () => {
-            const prompt = document.getElementById('prompt').value;
-            const outputEl = document.getElementById('output');
-            const statusEl = document.getElementById('status');
-
-            outputEl.textContent = '';
-            outputEl.className = 'output streaming';
-            statusEl.textContent = 'Generating...';
-            statusEl.className = 'status loading';
-
-            const options = {
-                maxTokens: parseInt(document.getElementById('maxTokens').value),
-                temperature: parseFloat(document.getElementById('temperature').value),
-            };
-
-            try {
-                // Placeholder streaming
-                const tokens = ['Hello', ', ', 'this', ' is', ' a', ' placeholder', ' response', '!'];
-                for (const token of tokens) {
-                    await new Promise(resolve => setTimeout(resolve, 200));
-                    outputEl.textContent += token;
-                }
-
-                // Real implementation:
-                // for await (const token of model.inferStream(prompt, options)) {
-                //     outputEl.textContent += token;
-                // }
-
-                outputEl.className = 'output';
-                statusEl.textContent = 'Generation complete.';
-                statusEl.className = 'status ready';
-
-            } catch (err) {
-                outputEl.textContent = `Error: ${err.message}`;
-                outputEl.className = 'output';
-                statusEl.textContent = 'Generation failed.';
-                statusEl.className = 'status error';
-            }
-        });
-
-        document.getElementById('generateBlockingBtn').addEventListener('click', async () => {
-            const prompt = document.getElementById('prompt').value;
-            const outputEl = document.getElementById('output');
-            const statusEl = document.getElementById('status');
-
-            outputEl.textContent = 'Generating (blocking)...';
-            statusEl.textContent = 'Generating...';
-            statusEl.className = 'status loading';
-
-            const options = {
-                maxTokens: parseInt(document.getElementById('maxTokens').value),
-                temperature: parseFloat(document.getElementById('temperature').value),
-            };
-
-            try {
-                // Placeholder
-                await new Promise(resolve => setTimeout(resolve, 1500));
-                outputEl.textContent = 'This is a placeholder blocking response from wasm-chord!';
-
-                // Real implementation:
-                // const result = await model.infer(prompt, options);
-                // outputEl.textContent = result;
-
-                statusEl.textContent = 'Generation complete.';
-                statusEl.className = 'status ready';
-
-            } catch (err) {
-                outputEl.textContent = `Error: ${err.message}`;
-                statusEl.textContent = 'Generation failed.';
-                statusEl.className = 'status error';
-            }
-        });
-
-        // Initialize on load
-        init();
-    </script>
+    <script type="module" src="app.js"></script>
 </body>
 </html>
