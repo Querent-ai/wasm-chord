@@ -91,7 +91,7 @@ jobs:
 
       - name: Build examples (with GPU feature)
         run: |
-          cargo build --release --features gpu --manifest-path examples/gpu-generation/Cargo.toml
+          cargo build --release --manifest-path examples/gpu-generation/Cargo.toml
           cargo build --release --features gpu --manifest-path examples/benchmark/Cargo.toml
 
   docs:
