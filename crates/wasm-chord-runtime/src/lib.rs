@@ -3,11 +3,13 @@
 //! Provides both C ABI and wasm-bindgen interfaces for host integration.
 
 mod abi;
+mod chat;
 mod context;
 mod inference;
 mod transformer;
 
 pub use abi::*;
+pub use chat::{ChatMessage, ChatRole, ChatTemplate};
 pub use context::RuntimeContext;
 pub use inference::{GenOptions, GenerationState, InferenceSession};
 pub use transformer::{GenerationConfig, KVCache, Model, MultiHeadAttention, TransformerConfig};

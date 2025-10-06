@@ -8,6 +8,7 @@ members = [
     "examples/cli",
     "examples/inference",
     "examples/simple-generation",
+    "examples/chat",
 ]
 
 [workspace.package]
