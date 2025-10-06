@@ -1110,6 +1110,89 @@ impl Model {
         Ok(generated_text)
     }
 
+    /// Generate text with streaming callback
+    ///
+    /// Calls the callback for each generated token in real-time.
+    ///
+    /// # Arguments
+    /// * `prompt` - Input text prompt
+    /// * `tokenizer` - Tokenizer for encoding/decoding
+    /// * `config` - Generation configuration
+    /// * `callback` - Function called for each token: (token_id, decoded_text) -> bool (continue?)
+    ///
+    /// # Returns
+    /// Full generated text
+    pub fn generate_stream<F>(
+        &mut self,
+        prompt: &str,
+        tokenizer: &Tokenizer,
+        config: &GenerationConfig,
+        mut callback: F,
+    ) -> Result<String>
+    where
+        F: FnMut(u32, &str) -> bool,
+    {
+        let max_tokens = config.max_tokens;
+        let temperature = config.temperature;
+        let top_p = config.top_p;
+        let top_k = config.top_k;
+        let repetition_penalty = config.repetition_penalty;
+        use wasm_chord_core::error::Error;
+
+        // Clear KV cache for new generation
+        self.clear_kv_cache();
+
+        // Encode prompt
+        let mut tokens = tokenizer.encode(prompt, true)?;
+
+        if tokens.is_empty() {
+            return Err(Error::ParseError("Empty token sequence".to_string()));
+        }
+
+        let num_prompt_tokens = tokens.len();
+        let mut pos = 0;
+        let mut token = tokens[0];
+
+        // Main generation loop
+        while pos < num_prompt_tokens + max_tokens - 1 {
+            let logits = self.forward(&[token], pos)?;
+
+            let mut last_logits = logits[(logits.len() - self.config.vocab_size)..].to_vec();
+
+            let next;
+            if pos < num_prompt_tokens - 1 {
+                // Still processing prompt
+                next = tokens[pos + 1];
+            } else {
+                // Generate new token
+                self.apply_repetition_penalty(&mut last_logits, &tokens, repetition_penalty);
+                next = self.sample(&last_logits, temperature, top_p, top_k)?;
+
+                // Check for EOS
+                if next == tokenizer.special_tokens().eos_token_id {
+                    break;
+                }
+
+                tokens.push(next);
+
+                // Decode just this token and call callback
+                let token_text = tokenizer.decode(&[next], true)?;
+
+                // Call callback - if it returns false, stop generation
+                if !callback(next, &token_text) {
+                    break;
+                }
+            }
+
+            pos += 1;
+            token = next;
+        }
+
+        // Return full generated text
+        let generated_text = tokenizer.decode(&tokens, true)?;
+        Ok(generated_text)
+    }
+
     /// Clear all KV caches (for new sequence)
     pub fn clear_kv_cache(&mut self) {
         for cache in &mut self.kv_caches {
