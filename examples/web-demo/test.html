@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>WASM Test</title>
+</head>
+<body>
+    <h1>WASM Module Test</h1>
+    <div id="status">Loading...</div>
+
+    <script type="module">
+        import init, { version } from './pkg/wasm_chord_runtime.js';
+
+        async function test() {
+            try {
+                await init();
+                const ver = version();
+                document.getElementById('status').innerHTML = `
+                    <div style="color: green;">✅ WASM loaded successfully!</div>
+                    <div>Version: ${ver}</div>
+                `;
+                console.log('WASM initialized, version:', ver);
+            } catch (error) {
+                document.getElementById('status').innerHTML = `
+                    <div style="color: red;">❌ Error: ${error.message}</div>
+                `;
+                console.error('Failed to initialize WASM:', error);
+            }
+        }
+
+        test();
+    </script>
+</body>
+</html>

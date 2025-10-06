@@ -1,6 +1,6 @@
 // WASM-Chord Web Demo Application
 
-import init, { WasmModel, format_chat, version } from '../../crates/wasm-chord-runtime/pkg/wasm_chord_runtime.js';
+import init, { WasmModel, format_chat, version } from './pkg/wasm_chord_runtime.js';
 
 let model = null;
 let conversationHistory = [];

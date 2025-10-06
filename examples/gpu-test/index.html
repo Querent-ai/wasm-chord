@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGPU Test Suite</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Monaco', 'Menlo', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #4ec9b0;
+            margin-bottom: 20px;
+        }
+
+        .status {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            background: #252526;
+            border-left: 4px solid #007acc;
+        }
+
+        .test-results {
+            background: #252526;
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .test-case {
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 4px;
+            background: #2d2d30;
+            border-left: 4px solid #3c3c3c;
+        }
+
+        .test-case.pass {
+            border-left-color: #4ec9b0;
+        }
+
+        .test-case.fail {
+            border-left-color: #f48771;
+        }
+
+        .test-case.running {
+            border-left-color: #dcdcaa;
+        }
+
+        .test-name {
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .test-details {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .summary {
+            margin-top: 20px;
+            padding: 15px;
+            background: #1e1e1e;
+            border-radius: 4px;
+            display: flex;
+            gap: 20px;
+        }
+
+        .summary-item {
+            flex: 1;
+            text-align: center;
+        }
+
+        .summary-label {
+            font-size: 0.9em;
+            opacity: 0.7;
+        }
+
+        .summary-value {
+            font-size: 2em;
+            font-weight: bold;
+        }
+
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background: #1177bb;
+        }
+
+        button:disabled {
+            background: #3c3c3c;
+            cursor: not-allowed;
+        }
+
+        .error {
+            color: #f48771;
+            padding: 10px;
+            background: #5a1d1d;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎮 WebGPU Test Suite</h1>
+
+        <div class="status" id="status">
+            Initializing...
+        </div>
+
+        <button id="run-tests" disabled>Run Tests</button>
+
+        <div class="test-results" id="results"></div>
+
+        <div class="summary">
+            <div class="summary-item">
+                <div class="summary-label">Passed</div>
+                <div class="summary-value" id="passed" style="color: #4ec9b0;">0</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Failed</div>
+                <div class="summary-value" id="failed" style="color: #f48771;">0</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Total</div>
+                <div class="summary-value" id="total">0</div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import init, { WasmGpuTester } from './pkg/wasm_chord_gpu.js';
+
+        let tester = null;
+        let passedCount = 0;
+        let failedCount = 0;
+        let totalCount = 0;
+
+        const statusEl = document.getElementById('status');
+        const resultsEl = document.getElementById('results');
+        const runBtn = document.getElementById('run-tests');
+        const passedEl = document.getElementById('passed');
+        const failedEl = document.getElementById('failed');
+        const totalEl = document.getElementById('total');
+
+        async function checkWebGPU() {
+            if (!navigator.gpu) {
+                statusEl.innerHTML = '<div class="error">❌ WebGPU not supported in this browser. Try Chrome 113+ or Edge 113+</div>';
+                return false;
+            }
+
+            try {
+                const adapter = await navigator.gpu.requestAdapter();
+                if (!adapter) {
+                    statusEl.innerHTML = '<div class="error">❌ No WebGPU adapter found</div>';
+                    return false;
+                }
+
+                const device = await adapter.requestDevice();
+                statusEl.innerHTML = `✅ WebGPU available<br>Adapter: ${adapter.info ? adapter.info.device : 'Unknown'}`;
+                return true;
+            } catch (error) {
+                statusEl.innerHTML = `<div class="error">❌ WebGPU error: ${error.message}</div>`;
+                return false;
+            }
+        }
+
+        function addTest(name, status, details = '') {
+            const testDiv = document.createElement('div');
+            testDiv.className = `test-case ${status}`;
+            testDiv.innerHTML = `
+                <div class="test-name">${status === 'pass' ? '✅' : status === 'fail' ? '❌' : '⏳'} ${name}</div>
+                ${details ? `<div class="test-details">${details}</div>` : ''}
+            `;
+            resultsEl.appendChild(testDiv);
+
+            if (status === 'pass') {
+                passedCount++;
+                passedEl.textContent = passedCount;
+            } else if (status === 'fail') {
+                failedCount++;
+                failedEl.textContent = failedCount;
+            }
+
+            totalCount++;
+            totalEl.textContent = totalCount;
+
+            return testDiv;
+        }
+
+        async function runTests() {
+            resultsEl.innerHTML = '';
+            passedCount = 0;
+            failedCount = 0;
+            totalCount = 0;
+            runBtn.disabled = true;
+
+            // Test 1: Matrix Multiplication
+            const test1 = addTest('Matrix Multiplication (2x3 @ 3x2)', 'running');
+            try {
+                const a = new Float32Array([1, 2, 3, 4, 5, 6]);
+                const b = new Float32Array([1, 2, 3, 4, 5, 6]);
+
+                const result = await tester.test_matmul(a, b, 2, 3, 2);
+
+                // Expected: [22, 28, 49, 64]
+                const expected = [22, 28, 49, 64];
+                let allClose = true;
+                for (let i = 0; i < 4; i++) {
+                    if (Math.abs(result[i] - expected[i]) > 0.001) {
+                        allClose = false;
+                        break;
+                    }
+                }
+
+                test1.className = allClose ? 'test-case pass' : 'test-case fail';
+                test1.querySelector('.test-name').textContent =
+                    (allClose ? '✅' : '❌') + ' Matrix Multiplication (2x3 @ 3x2)';
+                test1.querySelector('.test-details').textContent =
+                    allClose ? `Result: [${result.slice(0, 4).join(', ')}]` :
+                    `Expected [${expected.join(', ')}], got [${result.slice(0, 4).join(', ')}]`;
+
+                if (allClose) passedCount++; else failedCount++;
+                passedEl.textContent = passedCount;
+                failedEl.textContent = failedCount;
+            } catch (error) {
+                test1.className = 'test-case fail';
+                test1.querySelector('.test-name').textContent = '❌ Matrix Multiplication (2x3 @ 3x2)';
+                test1.querySelector('.test-details').textContent = `Error: ${error.message}`;
+                failedCount++;
+                failedEl.textContent = failedCount;
+            }
+
+            // Test 2: Large Matrix Multiplication
+            const test2 = addTest('Large Matrix Multiplication (64x64 @ 64x64)', 'running');
+            try {
+                const size = 64;
+                const a = new Float32Array(size * size);
+                const b = new Float32Array(size * size);
+                for (let i = 0; i < size * size; i++) {
+                    a[i] = Math.random();
+                    b[i] = Math.random();
+                }
+
+                const start = performance.now();
+                const result = await tester.test_matmul(a, b, size, size, size);
+                const duration = performance.now() - start;
+
+                test2.className = 'test-case pass';
+                test2.querySelector('.test-name').textContent = '✅ Large Matrix Multiplication (64x64 @ 64x64)';
+                test2.querySelector('.test-details').textContent = `Completed in ${duration.toFixed(2)}ms`;
+                passedCount++;
+                passedEl.textContent = passedCount;
+            } catch (error) {
+                test2.className = 'test-case fail';
+                test2.querySelector('.test-name').textContent = '❌ Large Matrix Multiplication (64x64 @ 64x64)';
+                test2.querySelector('.test-details').textContent = `Error: ${error.message}`;
+                failedCount++;
+                failedEl.textContent = failedCount;
+            }
+
+            runBtn.disabled = false;
+            statusEl.innerHTML = `✅ Tests complete: ${passedCount} passed, ${failedCount} failed`;
+        }
+
+        async function init_tests() {
+            // Check WebGPU support
+            const hasGPU = await checkWebGPU();
+            if (!hasGPU) {
+                return;
+            }
+
+            // Initialize WASM
+            try {
+                await init();
+                tester = new WasmGpuTester();
+                await tester.initialize();
+
+                statusEl.innerHTML += '<br>✅ GPU backend initialized';
+                runBtn.disabled = false;
+                runBtn.onclick = runTests;
+            } catch (error) {
+                statusEl.innerHTML = `<div class="error">❌ Failed to initialize: ${error.message}</div>`;
+            }
+        }
+
+        init_tests();
+    </script>
+</body>
+</html>

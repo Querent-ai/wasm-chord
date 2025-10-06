@@ -4,11 +4,15 @@ Browser-based LLM chat with real-time streaming - 100% local inference!
 
 ## Quick Start
 
-### 1. Build WASM Module
+### 1. Build WASM Module (if not already built)
 ```bash
 cd ../../crates/wasm-chord-runtime
 wasm-pack build --target web --out-dir pkg
+# Copy to web-demo (if needed)
+cp -r pkg ../../examples/web-demo/
 ```
+
+**Note**: The `pkg/` directory is already included in the web-demo folder for convenience.
 
 ### 2. Get a Model
 Download TinyLlama 1.1B Q8:
