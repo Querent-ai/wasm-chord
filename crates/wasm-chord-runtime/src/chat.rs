@@ -31,15 +31,18 @@ impl ChatMessage {
 #[derive(Debug, Clone)]
 pub enum ChatTemplate {
     /// ChatML format (used by TinyLlama, Mistral, etc.)
-    /// <|system|>\n{system}</s>\n<|user|>\n{user}</s>\n<|assistant|>\n
+    ///
+    /// Format: `<|system|>\n{system}</s>\n<|user|>\n{user}</s>\n<|assistant|>\n`
     ChatML,
 
     /// Llama 2 format
-    /// [INST] <<SYS>>\n{system}\n<</SYS>>\n\n{user} [/INST]
+    ///
+    /// Format: `\[INST\] <<SYS>>\n{system}\n<</SYS>>\n\n{user} \[/INST\]`
     Llama2,
 
     /// Alpaca format
-    /// ### Instruction:\n{instruction}\n\n### Response:\n
+    ///
+    /// Format: `### Instruction:\n{instruction}\n\n### Response:\n`
     Alpaca,
 }
 
