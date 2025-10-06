@@ -8,6 +8,9 @@ mod context;
 mod inference;
 mod transformer;
 
+#[cfg(target_arch = "wasm32")]
+mod web;
+
 pub use abi::*;
 pub use chat::{ChatMessage, ChatRole, ChatTemplate};
 pub use context::RuntimeContext;
