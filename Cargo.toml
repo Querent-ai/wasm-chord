@@ -10,6 +10,7 @@ members = [
     "examples/simple-generation",
     "examples/chat",
     "examples/chat-streaming",
+    "examples/gpu-generation",
 ]
 
 [workspace.package]
