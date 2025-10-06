@@ -59,9 +59,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Chat loop
-    let mut conversation: Vec<ChatMessage> = vec![
-        ChatMessage::system("You are a helpful, friendly AI assistant. Keep responses concise and relevant."),
-    ];
+    let mut conversation: Vec<ChatMessage> = vec![ChatMessage::system(
+        "You are a helpful, friendly AI assistant. Keep responses concise and relevant.",
+    )];
 
     println!("Type 'quit' to exit, 'clear' to reset conversation.\n");
 
@@ -85,9 +85,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         if input == "clear" {
-            conversation = vec![
-                ChatMessage::system("You are a helpful, friendly AI assistant. Keep responses concise and relevant."),
-            ];
+            conversation = vec![ChatMessage::system(
+                "You are a helpful, friendly AI assistant. Keep responses concise and relevant.",
+            )];
             println!("\n✨ Conversation cleared.\n");
             continue;
         }
@@ -106,20 +106,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut assistant_response = String::new();
 
-        let _result = model.generate_stream(&prompt, &tokenizer, &gen_config, |_token_id, token_text| {
-            // Print token in real-time
-            print!("{}", token_text);
-            io::stdout().flush().ok();
+        let _result =
+            model.generate_stream(&prompt, &tokenizer, &gen_config, |_token_id, token_text| {
+                // Print token in real-time
+                print!("{}", token_text);
+                io::stdout().flush().ok();
 
-            assistant_response.push_str(token_text);
+                assistant_response.push_str(token_text);
 
-            // Continue generation
-            true
-        })?;
+                // Continue generation
+                true
+            })?;
 
         let duration = start.elapsed();
 
-        println!("\n⏱️  ({:.1}s, {:.2} tok/s)\n",
+        println!(
+            "\n⏱️  ({:.1}s, {:.2} tok/s)\n",
             duration.as_secs_f32(),
             gen_config.max_tokens as f32 / duration.as_secs_f32()
         );

@@ -9,6 +9,7 @@ members = [
     "examples/inference",
     "examples/simple-generation",
     "examples/chat",
+    "examples/chat-streaming",
 ]
 
 [workspace.package]
