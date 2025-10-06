@@ -8,6 +8,9 @@ use wasm_chord_core::error::Result;
 use wasm_chord_core::Tokenizer;
 use wasm_chord_cpu::matmul_f32;
 
+#[cfg(feature = "gpu")]
+use wasm_chord_gpu::GpuBackend;
+
 /// Transformer configuration
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -119,6 +122,29 @@ impl MultiHeadAttention {
         Self { config, head_dim }
     }
 
+    /// Helper: matrix multiplication with GPU/CPU fallback
+    fn matmul(
+        &self,
+        a: &[f32],
+        b: &[f32],
+        m: usize,
+        k: usize,
+        n: usize,
+        #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
+    ) -> Result<Vec<f32>> {
+        #[cfg(feature = "gpu")]
+        if let Some(gpu) = gpu {
+            if let Ok(result) = gpu.matmul(a, b, m as u32, k as u32, n as u32) {
+                return Ok(result);
+            }
+        }
+
+        // CPU fallback
+        let mut result = vec![0.0; m * n];
+        matmul_f32(a, b, &mut result, m, k, n)?;
+        Ok(result)
+    }
+
     /// Apply attention with KV caching
     ///
     /// # Arguments
@@ -126,6 +152,7 @@ impl MultiHeadAttention {
     /// * `weights` - Model weights (wq, wk, wv, wo)
     /// * `kv_cache` - KV cache for this layer
     /// * `position` - Current position in sequence
+    /// * `gpu` - Optional GPU backend
     ///
     /// # Returns
     /// Output [batch, seq_len, hidden_size]
@@ -135,40 +162,49 @@ impl MultiHeadAttention {
         weights: &AttentionWeights,
         kv_cache: &mut KVCache,
         position: usize,
+        #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
     ) -> Result<Vec<f32>> {
         let seq_len = hidden_states.len() / self.config.hidden_size;
         let hidden_size = self.config.hidden_size;
 
         // Project to Q, K, V
-        let mut q = vec![0.0; seq_len * hidden_size];
-        let mut k = vec![0.0; seq_len * self.config.num_kv_heads * self.head_dim];
-        let mut v = vec![0.0; seq_len * self.config.num_kv_heads * self.head_dim];
-
         // Q projection: [seq_len, hidden_size] x [hidden_size, hidden_size]
-        matmul_f32(hidden_states, &weights.wq, &mut q, seq_len, hidden_size, hidden_size)?;
+        let q = self.matmul(
+            hidden_states,
+            &weights.wq,
+            seq_len,
+            hidden_size,
+            hidden_size,
+            #[cfg(feature = "gpu")]
+            gpu,
+        )?;
 
         // K projection: [seq_len, hidden_size] x [hidden_size, num_kv_heads * head_dim]
-        matmul_f32(
+        let k = self.matmul(
             hidden_states,
             &weights.wk,
-            &mut k,
             seq_len,
             hidden_size,
             self.config.num_kv_heads * self.head_dim,
+            #[cfg(feature = "gpu")]
+            gpu,
         )?;
 
         // V projection
-        matmul_f32(
+        let v = self.matmul(
             hidden_states,
             &weights.wv,
-            &mut v,
             seq_len,
             hidden_size,
             self.config.num_kv_heads * self.head_dim,
+            #[cfg(feature = "gpu")]
+            gpu,
         )?;
 
         // Apply RoPE (Rotary Position Embedding)
         // Apply different positions for each token in the sequence
+        let mut q = q;
+        let mut k = k;
         self.apply_rope(&mut q, position, seq_len, self.config.num_heads)?;
         self.apply_rope(&mut k, position, seq_len, self.config.num_kv_heads)?;
 
@@ -198,8 +234,15 @@ impl MultiHeadAttention {
         )?;
 
         // Output projection
-        let mut result = vec![0.0; seq_len * hidden_size];
-        matmul_f32(&output, &weights.wo, &mut result, seq_len, hidden_size, hidden_size)?;
+        let result = self.matmul(
+            &output,
+            &weights.wo,
+            seq_len,
+            hidden_size,
+            hidden_size,
+            #[cfg(feature = "gpu")]
+            gpu,
+        )?;
 
         Ok(result)
     }
@@ -433,25 +476,60 @@ impl FeedForward {
         Self { config }
     }
 
-    pub fn forward(&self, hidden_states: &[f32], weights: &FFNWeights) -> Result<Vec<f32>> {
+    /// Helper: matrix multiplication with GPU/CPU fallback
+    fn matmul(
+        &self,
+        a: &[f32],
+        b: &[f32],
+        m: usize,
+        k: usize,
+        n: usize,
+        #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
+    ) -> Result<Vec<f32>> {
+        #[cfg(feature = "gpu")]
+        if let Some(gpu) = gpu {
+            if let Ok(result) = gpu.matmul(a, b, m as u32, k as u32, n as u32) {
+                return Ok(result);
+            }
+        }
+
+        // CPU fallback
+        let mut result = vec![0.0; m * n];
+        matmul_f32(a, b, &mut result, m, k, n)?;
+        Ok(result)
+    }
+
+    pub fn forward(
+        &self,
+        hidden_states: &[f32],
+        weights: &FFNWeights,
+        #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
+    ) -> Result<Vec<f32>> {
         let seq_len = hidden_states.len() / self.config.hidden_size;
         let hidden_size = self.config.hidden_size;
         let intermediate_size = self.config.intermediate_size;
 
         // Gate projection
-        let mut gate = vec![0.0; seq_len * intermediate_size];
-        matmul_f32(
+        let mut gate = self.matmul(
             hidden_states,
             &weights.w_gate,
-            &mut gate,
             seq_len,
             hidden_size,
             intermediate_size,
+            #[cfg(feature = "gpu")]
+            gpu,
         )?;
 
         // Up projection
-        let mut up = vec![0.0; seq_len * intermediate_size];
-        matmul_f32(hidden_states, &weights.w_up, &mut up, seq_len, hidden_size, intermediate_size)?;
+        let up = self.matmul(
+            hidden_states,
+            &weights.w_up,
+            seq_len,
+            hidden_size,
+            intermediate_size,
+            #[cfg(feature = "gpu")]
+            gpu,
+        )?;
 
         // SiLU activation: gate * sigmoid(gate) * up
         for i in 0..gate.len() {
@@ -460,8 +538,15 @@ impl FeedForward {
         }
 
         // Down projection
-        let mut output = vec![0.0; seq_len * hidden_size];
-        matmul_f32(&gate, &weights.w_down, &mut output, seq_len, intermediate_size, hidden_size)?;
+        let output = self.matmul(
+            &gate,
+            &weights.w_down,
+            seq_len,
+            intermediate_size,
+            hidden_size,
+            #[cfg(feature = "gpu")]
+            gpu,
+        )?;
 
         Ok(output)
     }
@@ -522,13 +607,20 @@ impl TransformerLayer {
         hidden_states: &[f32],
         kv_cache: &mut KVCache,
         position: usize,
+        #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
     ) -> Result<Vec<f32>> {
         // Pre-norm architecture (like LLaMA)
 
         // 1. Attention block with residual
         let normed = self.rms_norm(hidden_states, &self.attention_norm)?;
-        let attn_output =
-            self.attention.forward(&normed, &self.attention_weights, kv_cache, position)?;
+        let attn_output = self.attention.forward(
+            &normed,
+            &self.attention_weights,
+            kv_cache,
+            position,
+            #[cfg(feature = "gpu")]
+            gpu,
+        )?;
 
         let mut hidden = hidden_states.to_vec();
         for i in 0..hidden.len() {
@@ -537,7 +629,12 @@ impl TransformerLayer {
 
         // 2. FFN block with residual
         let normed = self.rms_norm(&hidden, &self.ffn_norm)?;
-        let ffn_output = self.ffn.forward(&normed, &self.ffn_weights)?;
+        let ffn_output = self.ffn.forward(
+            &normed,
+            &self.ffn_weights,
+            #[cfg(feature = "gpu")]
+            gpu,
+        )?;
 
         for i in 0..hidden.len() {
             hidden[i] += ffn_output[i];
@@ -600,6 +697,9 @@ pub struct Model {
     pub lm_head: Vec<f32>,
     /// KV caches for each layer
     pub kv_caches: Vec<KVCache>,
+    /// GPU backend (optional, enabled with "gpu" feature)
+    #[cfg(feature = "gpu")]
+    gpu: Option<GpuBackend>,
 }
 
 /// Transpose a matrix stored in row-major order
@@ -634,7 +734,51 @@ impl Model {
             kv_caches,
             layers,
             config,
+            #[cfg(feature = "gpu")]
+            gpu: None,
         }
+    }
+
+    /// Initialize GPU backend (if feature enabled)
+    #[cfg(feature = "gpu")]
+    pub fn init_gpu(&mut self) -> Result<()> {
+        if GpuBackend::is_available() {
+            match pollster::block_on(GpuBackend::new()) {
+                Ok(gpu) => {
+                    eprintln!("✅ GPU backend initialized successfully");
+                    self.gpu = Some(gpu);
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("⚠️  GPU initialization failed: {}", e);
+                    Ok(()) // Fall back to CPU
+                }
+            }
+        } else {
+            eprintln!("⚠️  GPU not available, using CPU backend");
+            Ok(())
+        }
+    }
+
+    /// Matrix multiplication with GPU/CPU fallback
+    ///
+    /// Tries GPU first (if enabled), falls back to CPU
+    fn matmul(&self, a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Result<Vec<f32>> {
+        #[cfg(feature = "gpu")]
+        if let Some(ref gpu) = self.gpu {
+            // Try GPU matmul
+            match gpu.matmul(a, b, m as u32, k as u32, n as u32) {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    eprintln!("⚠️  GPU matmul failed: {}, falling back to CPU", e);
+                }
+            }
+        }
+
+        // CPU fallback
+        let mut result = vec![0.0; m * n];
+        matmul_f32(a, b, &mut result, m, k, n)?;
+        Ok(result)
     }
 
     /// Load weights from GGUF tensors
@@ -807,6 +951,28 @@ impl Model {
         Ok(())
     }
 
+    /// Forward pass through a single layer
+    ///
+    /// Helper method to avoid borrow checker issues
+    fn forward_layer(
+        &mut self,
+        layer_idx: usize,
+        hidden_states: &[f32],
+        position: usize,
+    ) -> Result<Vec<f32>> {
+        let kv_cache = &mut self.kv_caches[layer_idx];
+        #[cfg(feature = "gpu")]
+        let gpu = self.gpu.as_ref();
+
+        self.layers[layer_idx].forward(
+            hidden_states,
+            kv_cache,
+            position,
+            #[cfg(feature = "gpu")]
+            gpu,
+        )
+    }
+
     /// Forward pass through the model
     ///
     /// # Arguments
@@ -850,21 +1016,20 @@ impl Model {
         let profile = std::env::var("PROFILE").is_ok();
         for layer_idx in 0..self.config.num_layers {
             let layer_start = std::time::Instant::now();
-            let kv_cache = &mut self.kv_caches[layer_idx];
             if std::env::var("DEBUG_KV").is_ok() {
                 eprintln!(
                     "🔍 Layer {}, pos={}, kv_cache.seq_pos BEFORE layer={}",
-                    layer_idx, position, kv_cache.seq_pos
+                    layer_idx, position, self.kv_caches[layer_idx].seq_pos
                 );
             }
-            hidden_states = self.layers[layer_idx].forward(&hidden_states, kv_cache, position)?;
+            hidden_states = self.forward_layer(layer_idx, &hidden_states, position)?;
             if profile {
                 eprintln!("  Layer {} took {:?}", layer_idx, layer_start.elapsed());
             }
             if std::env::var("DEBUG_KV").is_ok() {
                 eprintln!(
                     "✅ Layer {}, pos={}, kv_cache.seq_pos AFTER layer={}",
-                    layer_idx, position, kv_cache.seq_pos
+                    layer_idx, position, self.kv_caches[layer_idx].seq_pos
                 );
             }
         }
@@ -874,9 +1039,7 @@ impl Model {
 
         // 4. Project to vocabulary (LM head)
         let vocab_size = self.config.vocab_size;
-        let mut logits = vec![0.0; seq_len * vocab_size];
-
-        matmul_f32(&hidden_states, &self.lm_head, &mut logits, seq_len, hidden_size, vocab_size)?;
+        let logits = self.matmul(&hidden_states, &self.lm_head, seq_len, hidden_size, vocab_size)?;
 
         Ok(logits)
     }
