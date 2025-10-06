@@ -811,10 +811,9 @@ impl Model {
 
         // Load LM head (or tie with embeddings)
         if let Ok(lm_head_data) = tensor_loader.load_tensor("output.weight", parser) {
-            // Transpose: [vocab_size, hidden_size] -> [hidden_size, vocab_size]
-            let lm_head_transposed =
-                transpose_matrix(lm_head_data, self.config.vocab_size, self.config.hidden_size);
-            self.lm_head.copy_from_slice(&lm_head_transposed);
+            // GGUF has [hidden_size, vocab_size], transpose to [vocab_size, hidden_size] for our use
+            // Actually wait - we WANT [hidden_size, vocab_size], so no transpose needed!
+            self.lm_head.copy_from_slice(lm_head_data);
         } else {
             // Weight tying: LM head shares weights with token embeddings
             // Token embeddings are [vocab_size, hidden_size], transpose to [hidden_size, vocab_size]
@@ -859,54 +858,43 @@ impl Model {
             };
 
             if let Ok(wq) = tensor_loader.load_tensor(&wq_name, parser) {
-                // GGUF stores weights as [out, in] but our matmul expects [in, out]
-                // Transpose: [hidden_size, hidden_size] -> [hidden_size, hidden_size]
-                let wq_transposed =
-                    transpose_matrix(wq, self.config.hidden_size, self.config.hidden_size);
-                layer.attention_weights.wq.copy_from_slice(&wq_transposed);
+                // GGUF stores as [hidden_size, hidden_size] - use directly
+                layer.attention_weights.wq.copy_from_slice(wq);
                 if layer_idx == 0 {
                     let has_nan = wq.iter().any(|&x| x.is_nan());
                     let has_inf = wq.iter().any(|&x| x.is_infinite());
                     let sum: f32 = wq.iter().take(100).sum();
                     let min = wq.iter().copied().fold(f32::INFINITY, f32::min);
                     let max = wq.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                    eprintln!("Loaded {}: {} elements (transposed), nan={}, inf={}, sum100={:.6}, range=[{:.6}, {:.6}]",
+                    eprintln!("Loaded {}: {} elements, nan={}, inf={}, sum100={:.6}, range=[{:.6}, {:.6}]",
                               wq_name, wq.len(), has_nan, has_inf, sum, min, max);
                 }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wq_name);
             }
             if let Ok(wk) = tensor_loader.load_tensor(&wk_name, parser) {
-                // Transpose: [kv_dim, hidden_size] -> [hidden_size, kv_dim]
-                let kv_dim =
-                    self.config.num_kv_heads * (self.config.hidden_size / self.config.num_heads);
-                let wk_transposed = transpose_matrix(wk, kv_dim, self.config.hidden_size);
-                layer.attention_weights.wk.copy_from_slice(&wk_transposed);
+                // GGUF stores as [hidden_size, kv_dim] - use directly
+                layer.attention_weights.wk.copy_from_slice(wk);
                 if layer_idx == 0 {
-                    eprintln!("Loaded {}: {} elements (transposed)", wk_name, wk.len());
+                    eprintln!("Loaded {}: {} elements", wk_name, wk.len());
                 }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wk_name);
             }
             if let Ok(wv) = tensor_loader.load_tensor(&wv_name, parser) {
-                // Transpose: [kv_dim, hidden_size] -> [hidden_size, kv_dim]
-                let kv_dim =
-                    self.config.num_kv_heads * (self.config.hidden_size / self.config.num_heads);
-                let wv_transposed = transpose_matrix(wv, kv_dim, self.config.hidden_size);
-                layer.attention_weights.wv.copy_from_slice(&wv_transposed);
+                // GGUF stores as [hidden_size, kv_dim] - use directly
+                layer.attention_weights.wv.copy_from_slice(wv);
                 if layer_idx == 0 {
-                    eprintln!("Loaded {}: {} elements (transposed)", wv_name, wv.len());
+                    eprintln!("Loaded {}: {} elements", wv_name, wv.len());
                 }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wv_name);
             }
             if let Ok(wo) = tensor_loader.load_tensor(&wo_name, parser) {
-                // Transpose: [hidden_size, hidden_size] -> [hidden_size, hidden_size]
-                let wo_transposed =
-                    transpose_matrix(wo, self.config.hidden_size, self.config.hidden_size);
-                layer.attention_weights.wo.copy_from_slice(&wo_transposed);
+                // GGUF stores as [hidden_size, hidden_size] - use directly
+                layer.attention_weights.wo.copy_from_slice(wo);
                 if layer_idx == 0 {
-                    eprintln!("Loaded {}: {} elements (transposed)", wo_name, wo.len());
+                    eprintln!("Loaded {}: {} elements", wo_name, wo.len());
                 }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wo_name);
@@ -924,22 +912,16 @@ impl Model {
             let ffn_down_name = format!("blk.{}.ffn_down.weight", layer_idx);
 
             if let Ok(gate) = tensor_loader.load_tensor(&ffn_gate_name, parser) {
-                // Transpose: [intermediate_size, hidden_size] -> [hidden_size, intermediate_size]
-                let gate_transposed =
-                    transpose_matrix(gate, self.config.intermediate_size, self.config.hidden_size);
-                layer.ffn_weights.w_gate.copy_from_slice(&gate_transposed);
+                // GGUF stores as [hidden_size, intermediate_size] - use directly
+                layer.ffn_weights.w_gate.copy_from_slice(gate);
             }
             if let Ok(up) = tensor_loader.load_tensor(&ffn_up_name, parser) {
-                // Transpose: [intermediate_size, hidden_size] -> [hidden_size, intermediate_size]
-                let up_transposed =
-                    transpose_matrix(up, self.config.intermediate_size, self.config.hidden_size);
-                layer.ffn_weights.w_up.copy_from_slice(&up_transposed);
+                // GGUF stores as [hidden_size, intermediate_size] - use directly
+                layer.ffn_weights.w_up.copy_from_slice(up);
             }
             if let Ok(down) = tensor_loader.load_tensor(&ffn_down_name, parser) {
-                // Transpose: [hidden_size, intermediate_size] -> [intermediate_size, hidden_size]
-                let down_transposed =
-                    transpose_matrix(down, self.config.hidden_size, self.config.intermediate_size);
-                layer.ffn_weights.w_down.copy_from_slice(&down_transposed);
+                // GGUF stores as [intermediate_size, hidden_size] - use directly
+                layer.ffn_weights.w_down.copy_from_slice(down);
             }
 
             // FFN norm

@@ -1,0 +1,11 @@
+[package]
+name = "wasm-chord-check-lm-head"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "check-lm-head"
+path = "main.rs"
+
+[dependencies]
+wasm-chord-core = { path = "../../crates/wasm-chord-core" }

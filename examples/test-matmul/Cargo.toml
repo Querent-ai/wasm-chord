@@ -1,0 +1,12 @@
+[package]
+name = "wasm-chord-test-matmul"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "test-matmul"
+path = "main.rs"
+
+[dependencies]
+wasm-chord-core = { path = "../../crates/wasm-chord-core" }
+wasm-chord-cpu = { path = "../../crates/wasm-chord-cpu" }
