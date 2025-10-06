@@ -102,7 +102,8 @@ impl KVCache {
         if end <= self.max_size {
             self.keys[start..end].copy_from_slice(keys);
             self.values[start..end].copy_from_slice(values);
-            // Increment by number of elements added, not by 1
+            // Increment by number of elements added
+            // seq_pos tracks the element offset in the flattened cache arrays
             self.seq_pos += size;
         }
     }

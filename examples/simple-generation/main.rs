@@ -60,10 +60,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let prompt = "The meaning of life is";
     let config = GenerationConfig {
         max_tokens: 10,
-        temperature: 0.7,
+        temperature: 0.0, // Greedy sampling for debugging
         top_p: 1.0,
         top_k: 0,
-        repetition_penalty: 1.15,
+        repetition_penalty: 1.0, // Disable for now
     };
 
     println!("🎲 Generating text...");
