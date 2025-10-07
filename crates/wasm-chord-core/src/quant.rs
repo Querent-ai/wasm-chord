@@ -267,9 +267,9 @@ mod tests {
 
         // 0x10 -> lower = 0, upper = 1
         // After offset -8: lower = -8, upper = -7
-        // With scale=1.0
-        assert_eq!(output[0], -8.0);
-        assert_eq!(output[1], -7.0);
+        // With scale=0.01
+        assert_eq!(output[0], -0.08);
+        assert_eq!(output[16], -0.07);
     }
 
     #[test]
