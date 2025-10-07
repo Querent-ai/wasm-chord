@@ -13,6 +13,10 @@ members = [
     "examples/gpu-generation",
     "examples/benchmark",
     "examples/transpose-debug",
+    "examples/model-coherence-test",
+    "examples/tokenizer-debug",
+    "examples/chat-model-test",
+    "examples/debug-generation",
 ]
 
 [workspace.package]

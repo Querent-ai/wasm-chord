@@ -1,23 +1,19 @@
-/// Simple text generation example
+/// Chat Model Test
 ///
-/// This example demonstrates end-to-end text generation:
-/// 1. Load GGUF model and tokenizer
-/// 2. Generate text from a prompt
-/// 3. Display the result
-///
-/// Run with: cargo run --release --example simple_generation
+/// This test specifically uses the chat variant model with proper chat template formatting
+/// to see if we can get coherent output like Ollama.
 use std::fs::File;
 use std::io::BufReader;
 use wasm_chord_core::{GGUFParser, TensorLoader, Tokenizer};
 use wasm_chord_runtime::{GenerationConfig, Model, TransformerConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🚀 WASM-Chord Simple Text Generation");
-    println!("=====================================\n");
+    println!("🤖 WASM-Chord Chat Model Test");
+    println!("=============================\n");
 
-    // Model path - use Q4_K model to match llama.cpp test
+    // Use the chat variant model
     let model_path = "models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf";
-    println!("📂 Loading model: {}", model_path);
+    println!("📂 Loading chat model: {}", model_path);
 
     // === Load Model ===
     let file = File::open(model_path)?;
@@ -56,31 +52,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     model.load_from_gguf(&mut tensor_loader, &mut parser)?;
     println!("✅ Weights loaded\n");
 
-    // === Generate Text ===
-    let prompt = "Hi";
+    // === Test Multiple Prompts ===
+    let test_prompts = vec![
+        "Hello, how are you?",
+        "What is the capital of France?",
+        "Explain quantum computing in simple terms",
+        "Write a short poem about the ocean",
+    ];
 
     let config = GenerationConfig {
-        max_tokens: 8,    // Reasonable limit without KV cache
-        temperature: 0.7, // Add some randomness
-        top_p: 0.9,
-        top_k: 40,
-        repetition_penalty: 1.1,
+        max_tokens: 1,    // Just 1 token to test
+        temperature: 0.0, // Greedy for deterministic output
+        top_p: 1.0,
+        top_k: 0,
+        repetition_penalty: 1.0,
     };
 
-    // Enable debug mode to see what's happening
-    // std::env::set_var("DEBUG_FORWARD", "1");
-    // std::env::set_var("DEBUG_KV", "1");
+    // Test just one prompt first
+    let user_prompt = "Hello, how are you?";
+    println!("🧪 Testing: {}", user_prompt);
+    println!("{}", "=".repeat(50));
 
-    println!("🎲 Generating text...");
-    println!("   Prompt: {:?}", prompt);
-    println!("   Config: {:?}", config);
+    // Format with chat template (same as Ollama)
+    let prompt = format!(
+        "<|system|>\nYou are a helpful AI assistant.</s>\n<|user|>\n{}</s>\n<|assistant|>\n",
+        user_prompt
+    );
+
+    println!("📝 Formatted prompt:\n{}", prompt);
 
     let start = std::time::Instant::now();
     let generated = model.generate(&prompt, &tokenizer, &config)?;
     let duration = start.elapsed();
 
-    println!("\n✅ Generation complete in {:?}", duration);
-    println!("📝 Result:\n   {}\n", generated);
+    println!("⏱️  Generated in: {:?}", duration);
+    println!("🤖 Response:\n{}\n", generated);
+    println!("{}", "-".repeat(80));
+
+    // Now let's also test what Ollama produces with the same prompt
+    println!("\n🔄 For comparison, here's what Ollama produces:");
+    println!("{}", "=".repeat(50));
 
     Ok(())
 }

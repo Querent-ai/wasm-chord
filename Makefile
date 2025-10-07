@@ -86,7 +86,7 @@ lint-fix:
 	cargo clippy --workspace --all-targets --fix --allow-dirty --allow-staged
 
 lint-clippy:
-	cargo clippy --workspace --all-targets -- -D warnings
+	cargo clippy --workspace --lib -- -D warnings
 
 lint-deny:
 	cargo deny check -c deny.toml

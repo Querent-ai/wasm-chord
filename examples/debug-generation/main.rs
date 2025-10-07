@@ -1,21 +1,20 @@
-/// Simple text generation example
+/// Debug Generation Test
 ///
-/// This example demonstrates end-to-end text generation:
-/// 1. Load GGUF model and tokenizer
-/// 2. Generate text from a prompt
-/// 3. Display the result
-///
-/// Run with: cargo run --release --example simple_generation
+/// This test adds extensive debug logging to identify where the generation hangs.
 use std::fs::File;
 use std::io::BufReader;
 use wasm_chord_core::{GGUFParser, TensorLoader, Tokenizer};
 use wasm_chord_runtime::{GenerationConfig, Model, TransformerConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🚀 WASM-Chord Simple Text Generation");
-    println!("=====================================\n");
+    println!("🐛 Debug Generation Test");
+    println!("=======================\n");
 
-    // Model path - use Q4_K model to match llama.cpp test
+    // Enable debug logging
+    std::env::set_var("DEBUG", "1");
+    std::env::set_var("DEBUG_KV", "1");
+    std::env::set_var("DEBUG_LOGITS", "1");
+
     let model_path = "models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf";
     println!("📂 Loading model: {}", model_path);
 
@@ -56,31 +55,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     model.load_from_gguf(&mut tensor_loader, &mut parser)?;
     println!("✅ Weights loaded\n");
 
-    // === Generate Text ===
-    let prompt = "Hi";
-
+    // === Test Simple Generation ===
+    let prompt = "Hello";
     let config = GenerationConfig {
-        max_tokens: 8,    // Reasonable limit without KV cache
-        temperature: 0.7, // Add some randomness
-        top_p: 0.9,
-        top_k: 40,
-        repetition_penalty: 1.1,
+        max_tokens: 1,
+        temperature: 0.0,
+        top_p: 1.0,
+        top_k: 0,
+        repetition_penalty: 1.0,
     };
 
-    // Enable debug mode to see what's happening
-    // std::env::set_var("DEBUG_FORWARD", "1");
-    // std::env::set_var("DEBUG_KV", "1");
-
-    println!("🎲 Generating text...");
-    println!("   Prompt: {:?}", prompt);
-    println!("   Config: {:?}", config);
+    println!("🧪 Testing generation with prompt: \"{}\"", prompt);
+    println!("📋 Config: {:?}", config);
+    println!("{}", "=".repeat(50));
 
     let start = std::time::Instant::now();
-    let generated = model.generate(&prompt, &tokenizer, &config)?;
-    let duration = start.elapsed();
 
-    println!("\n✅ Generation complete in {:?}", duration);
-    println!("📝 Result:\n   {}\n", generated);
+    println!("🚀 Starting generation...");
+    match model.generate(prompt, &tokenizer, &config) {
+        Ok(generated) => {
+            let duration = start.elapsed();
+            println!("✅ Generation completed in {:?}", duration);
+            println!("📝 Result: \"{}\"", generated);
+        }
+        Err(e) => {
+            let duration = start.elapsed();
+            println!("❌ Generation failed in {:?}: {}", duration, e);
+        }
+    }
 
     Ok(())
 }
