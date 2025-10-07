@@ -15,8 +15,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🚀 WASM-Chord Simple Text Generation");
     println!("=====================================\n");
 
-    // Model path
-    let model_path = "models/tinyllama-q8.gguf";
+    // Model path - use Q4_K model to match llama.cpp test
+    let model_path = "models/tinyllama-1.1b.Q4_K_M.gguf";
     println!("📂 Loading model: {}", model_path);
 
     // === Load Model ===
@@ -59,12 +59,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // === Generate Text ===
     let prompt = "The meaning of life is";
     let config = GenerationConfig {
-        max_tokens: 10,
-        temperature: 0.0, // Greedy sampling for debugging
+        max_tokens: 10,   // More tokens to see pattern
+        temperature: 0.7, // Add some randomness to avoid repetition
         top_p: 1.0,
         top_k: 0,
-        repetition_penalty: 1.0, // Disable for now
+        repetition_penalty: 1.0,
     };
+
+    // Enable debug mode to see what's happening
+    std::env::set_var("DEBUG_FORWARD", "1");
+    std::env::set_var("DEBUG_KV", "1");
 
     println!("🎲 Generating text...");
     println!("   Prompt: {:?}", prompt);

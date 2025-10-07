@@ -40,3 +40,5 @@ build/
 .env
 .env.local
 models/
+llama2.c/
+tools/

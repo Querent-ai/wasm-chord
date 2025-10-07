@@ -180,6 +180,22 @@ impl MultiHeadAttention {
             gpu,
         )?;
 
+        // Debug Q weights and projection
+        if std::env::var("DEBUG_WEIGHTS").is_ok() {
+            eprintln!("  WQ weights (first 10): {:?}", &weights.wq[..10.min(weights.wq.len())]);
+            eprintln!(
+                "  WQ weights sum: {:.6}, mean: {:.6}",
+                weights.wq.iter().sum::<f32>(),
+                weights.wq.iter().sum::<f32>() / weights.wq.len() as f32
+            );
+            eprintln!("  Q projection (first 10): {:?}", &q[..10.min(q.len())]);
+            eprintln!(
+                "  Q projection sum: {:.6}, mean: {:.6}",
+                q.iter().sum::<f32>(),
+                q.iter().sum::<f32>() / q.len() as f32
+            );
+        }
+
         // K projection: [seq_len, hidden_size] x [hidden_size, num_kv_heads * head_dim]
         let k = self.matmul(
             hidden_states,
@@ -209,30 +225,48 @@ impl MultiHeadAttention {
         self.apply_rope(&mut q, position, seq_len, self.config.num_heads)?;
         self.apply_rope(&mut k, position, seq_len, self.config.num_kv_heads)?;
 
-        // Cache K, V
-        if std::env::var("DEBUG_KV").is_ok() {
-            eprintln!(
-                "  Before append: kv_cache.seq_pos={}, adding {} elements",
-                kv_cache.seq_pos,
-                k.len()
-            );
-            eprintln!("    K values being added (first 5): {:?}", &k[..k.len().min(5)]);
-        }
-        kv_cache.append(&k, &v);
-        if std::env::var("DEBUG_KV").is_ok() {
-            eprintln!("  After append: kv_cache.seq_pos={}", kv_cache.seq_pos);
-            eprintln!("    Cache K values (first 5): {:?}", &kv_cache.keys[..5]);
-        }
+        // Optional diagnostic: allow disabling KV cache via env to triage cache-related bugs
+        let disable_kv = std::env::var("DISABLE_KV").is_ok();
 
-        // Compute attention (pass position for correct causal masking)
-        // Only pass the valid portion of the cache (up to seq_pos)
-        let output = self.compute_attention(
-            &q,
-            &kv_cache.keys[..kv_cache.seq_pos],
-            &kv_cache.values[..kv_cache.seq_pos],
-            seq_len,
-            position,
-        )?;
+        let output = if disable_kv {
+            // Bypass cache: attend only to current K/V (useful for isolating KV issues)
+            if std::env::var("DEBUG_KV").is_ok() {
+                eprintln!(
+                    "  DISABLE_KV active: skipping cache append; using in-batch K/V (len={})",
+                    k.len()
+                );
+            }
+            self.compute_attention(&q, &k, &v, seq_len, position)?
+        } else {
+            // Cache K, V
+            if std::env::var("DEBUG_KV").is_ok() {
+                eprintln!(
+                    "  Before append: kv_cache.seq_pos={}, adding {} elements",
+                    kv_cache.seq_pos,
+                    k.len()
+                );
+                eprintln!("    K values being added (first 5): {:?}", &k[..k.len().min(5)]);
+            }
+            kv_cache.append(&k, &v);
+            if std::env::var("DEBUG_KV").is_ok() {
+                eprintln!("  After append: kv_cache.seq_pos={}", kv_cache.seq_pos);
+                eprintln!("    Cache K values (first 5): {:?}", &kv_cache.keys[..5]);
+            }
+
+            // Compute attention (pass position for correct causal masking)
+            // Calculate how many tokens are in the cache
+            let tokens_in_cache = kv_cache.seq_pos / (self.config.num_kv_heads * self.head_dim);
+            let elements_per_token = self.config.num_kv_heads * self.head_dim;
+            let cache_elements = tokens_in_cache * elements_per_token;
+
+            self.compute_attention(
+                &q,
+                &kv_cache.keys[..cache_elements],
+                &kv_cache.values[..cache_elements],
+                seq_len,
+                position,
+            )?
+        };
 
         // Output projection
         let result = self.matmul(
@@ -263,22 +297,32 @@ impl MultiHeadAttention {
         num_heads: usize,
     ) -> Result<()> {
         let head_dim = self.head_dim;
+        let debug_rope = std::env::var("DEBUG_ROPE").is_ok();
 
         // For each token in the sequence
         for seq_idx in 0..seq_len {
             let token_pos = start_pos + seq_idx;
 
+            if debug_rope && seq_idx == 0 {
+                eprintln!(
+                    "  RoPE: token_pos={}, head_dim={}, theta={}",
+                    token_pos, head_dim, self.config.rope_theta
+                );
+            }
+
             // For each head
             for head in 0..num_heads {
-                // For each pair of dimensions
-                for i in 0..head_dim / 2 {
-                    // Calculate index in tensor: [seq_idx][head][pair_idx]
-                    let base_idx = (seq_idx * num_heads + head) * head_dim;
+                let base_idx = (seq_idx * num_heads + head) * head_dim;
+
+                // Apply RoPE using INTERLEAVED pairing: (0,1), (2,3), (4,5), ...
+                // This matches llama2.c implementation
+                for i in (0..head_dim).step_by(2) {
                     let idx0 = base_idx + i;
-                    let idx1 = base_idx + i + head_dim / 2;
+                    let idx1 = base_idx + i + 1;
 
                     // RoPE frequency calculation
-                    let freq = 1.0 / self.config.rope_theta.powf(2.0 * i as f32 / head_dim as f32);
+                    // freq = 1.0 / (theta ^ (i / head_dim))  where i goes 0, 2, 4, ...
+                    let freq = 1.0 / self.config.rope_theta.powf((i as f32) / (head_dim as f32));
                     let angle = token_pos as f32 * freq;
 
                     let cos = angle.cos();
@@ -288,8 +332,19 @@ impl MultiHeadAttention {
                     let x0 = tensor[idx0];
                     let x1 = tensor[idx1];
 
-                    tensor[idx0] = x0 * cos - x1 * sin;
-                    tensor[idx1] = x0 * sin + x1 * cos;
+                    let new_x0 = x0 * cos - x1 * sin;
+                    let new_x1 = x0 * sin + x1 * cos;
+
+                    tensor[idx0] = new_x0;
+                    tensor[idx1] = new_x1;
+
+                    if debug_rope && head == 0 && i < 4 {
+                        eprintln!(
+                            "    head={}, i={}, freq={:.6}, angle={:.6}, cos={:.6}, sin={:.6}",
+                            head, i, freq, angle, cos, sin
+                        );
+                        eprintln!("      ({:.6}, {:.6}) -> ({:.6}, {:.6})", x0, x1, new_x0, new_x1);
+                    }
                 }
             }
         }
@@ -343,6 +398,23 @@ impl MultiHeadAttention {
         // K, V shape: [kv_seq_len, num_kv_heads, head_dim]
         let kv_seq_len = k.len() / (num_kv_heads * head_dim);
 
+        // Optional assertion to catch KV off-by-one/layout issues during single-token steps
+        if std::env::var("ASSERT_KV").is_ok() && seq_len == 1 {
+            let expected = position + 1; // when using cache, kv positions should be 0..=position
+            if kv_seq_len != expected {
+                eprintln!(
+                    "ASSERT_KV failed: kv_seq_len={}, expected={}, position={}, num_kv_heads={}, head_dim={}, k.len()={}",
+                    kv_seq_len,
+                    expected,
+                    position,
+                    num_kv_heads,
+                    head_dim,
+                    k.len()
+                );
+                panic!("KV cache length mismatch");
+            }
+        }
+
         if std::env::var("DEBUG_ATTN").is_ok() {
             eprintln!(
                 "ATTN: seq_len={}, kv_seq_len={}, position={}",
@@ -353,7 +425,6 @@ impl MultiHeadAttention {
         }
 
         let mut output = vec![0.0; seq_len * num_heads * head_dim];
-        let scale = 1.0 / (head_dim as f32).sqrt();
 
         // Process each query head
         for h in 0..num_heads {
@@ -374,11 +445,25 @@ impl MultiHeadAttention {
                     let k_offset = (j * num_kv_heads + kv_h) * head_dim;
                     let k_vec = &k[k_offset..k_offset + head_dim];
 
-                    // Compute dot product: Q · K^T (optimized)
-                    let score = self.dot_product(q_vec, k_vec);
+                    // Calculate the attention score as the dot product of q and k - EXACTLY like llama2.c
+                    let mut score = 0.0f32;
+                    for idx in 0..head_dim {
+                        score += q_vec[idx] * k_vec[idx];
+                    }
+                    // score /= sqrtf(head_size); - EXACTLY like llama2.c line 298
+                    score /= (head_dim as f32).sqrt();
+                    scores[j] = score;
 
-                    // Scale by sqrt(head_dim)
-                    scores[j] = score * scale;
+                    // Debug Q and K vectors for first head, first query
+                    if std::env::var("DEBUG_ATTENTION").is_ok() && h == 0 && i == 0 && j == 0 {
+                        eprintln!("  K vector (first 5): {:?}", &k_vec[..5.min(k_vec.len())]);
+                        eprintln!(
+                            "  Dot product: {:.6}, Scale: {:.6}",
+                            score * (head_dim as f32).sqrt(),
+                            1.0 / (head_dim as f32).sqrt()
+                        );
+                        eprintln!("  Q vector (first 5): {:?}", &q_vec[..5.min(q_vec.len())]);
+                    }
 
                     // Causal masking: can only attend to positions up to and including current position
                     // llama2.c does: for (t = 0; t <= pos; t++) { compute attention }
@@ -399,6 +484,20 @@ impl MultiHeadAttention {
                         exp_scores[j] = (scores[j] - max_score).exp();
                         sum_exp += exp_scores[j];
                     }
+                }
+
+                // Debug attention scores
+                if std::env::var("DEBUG_ATTENTION").is_ok() && h == 0 && i == 0 {
+                    eprintln!("  Q vector (first 5): {:?}", &q_vec[..5.min(q_vec.len())]);
+                    eprintln!(
+                        "  Attention scores (head 0, pos 0): {:?}",
+                        &scores[..5.min(scores.len())]
+                    );
+                    eprintln!("  Max score: {:.6}, Sum exp: {:.6}", max_score, sum_exp);
+                    eprintln!(
+                        "  Exp scores (first 5): {:?}",
+                        &exp_scores[..5.min(exp_scores.len())]
+                    );
                 }
 
                 // Normalize
@@ -799,7 +898,12 @@ impl Model {
             let max = embedding_data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
             eprintln!("Loaded token_embd.weight: {} elements, nan={}, inf={}, sum100={:.6}, range=[{:.6}, {:.6}]",
                       embedding_data.len(), has_nan, has_inf, sum, min, max);
-            self.token_embeddings.copy_from_slice(embedding_data);
+
+            // GGUF stores token embeddings as [hidden_size, vocab_size]
+            // We need [vocab_size, hidden_size] for token lookup
+            let embeddings_transposed =
+                transpose_matrix(embedding_data, self.config.hidden_size, self.config.vocab_size);
+            self.token_embeddings.copy_from_slice(&embeddings_transposed);
         } else {
             return Err(Error::ParseError("Missing token embeddings".to_string()));
         }
@@ -811,16 +915,18 @@ impl Model {
 
         // Load LM head (or tie with embeddings)
         if let Ok(lm_head_data) = tensor_loader.load_tensor("output.weight", parser) {
-            // GGUF has [hidden_size, vocab_size], transpose to [vocab_size, hidden_size] for our use
-            // Actually wait - we WANT [hidden_size, vocab_size], so no transpose needed!
-            self.lm_head.copy_from_slice(lm_head_data);
+            // GGUF stores output.weight as [hidden_size, vocab_size]
+            // We need [vocab_size, hidden_size] for matmul (ggml auto-transposes, we don't)
+            let lm_head_transposed =
+                transpose_matrix(lm_head_data, self.config.hidden_size, self.config.vocab_size);
+            self.lm_head.copy_from_slice(&lm_head_transposed);
         } else {
             // Weight tying: LM head shares weights with token embeddings
-            // Token embeddings are [vocab_size, hidden_size], transpose to [hidden_size, vocab_size]
+            // Token embeddings are [hidden_size, vocab_size], transpose to [vocab_size, hidden_size]
             let lm_head_transposed = transpose_matrix(
                 &self.token_embeddings,
-                self.config.vocab_size,
                 self.config.hidden_size,
+                self.config.vocab_size,
             );
             self.lm_head.copy_from_slice(&lm_head_transposed);
         }
@@ -858,44 +964,34 @@ impl Model {
             };
 
             if let Ok(wq) = tensor_loader.load_tensor(&wq_name, parser) {
-                // GGUF stores as [hidden_size, hidden_size] - use directly
+                // GGUF stores as [hidden_size, hidden_size] - NO TRANSPOSE needed
+                // Our matmul expects [hidden_size, hidden_size] and GGUF already has this
                 layer.attention_weights.wq.copy_from_slice(wq);
-                if layer_idx == 0 {
-                    let has_nan = wq.iter().any(|&x| x.is_nan());
-                    let has_inf = wq.iter().any(|&x| x.is_infinite());
-                    let sum: f32 = wq.iter().take(100).sum();
-                    let min = wq.iter().copied().fold(f32::INFINITY, f32::min);
-                    let max = wq.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                    eprintln!("Loaded {}: {} elements, nan={}, inf={}, sum100={:.6}, range=[{:.6}, {:.6}]",
-                              wq_name, wq.len(), has_nan, has_inf, sum, min, max);
-                }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wq_name);
             }
             if let Ok(wk) = tensor_loader.load_tensor(&wk_name, parser) {
-                // GGUF stores as [hidden_size, kv_dim] - use directly
-                layer.attention_weights.wk.copy_from_slice(wk);
-                if layer_idx == 0 {
-                    eprintln!("Loaded {}: {} elements", wk_name, wk.len());
-                }
+                // GGUF stores as [hidden_size, kv_dim], transpose to [kv_dim, hidden_size] for our matmul
+                let kv_dim =
+                    self.config.num_kv_heads * (self.config.hidden_size / self.config.num_heads);
+                let wk_t = transpose_matrix(wk, self.config.hidden_size, kv_dim);
+                layer.attention_weights.wk.copy_from_slice(&wk_t);
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wk_name);
             }
             if let Ok(wv) = tensor_loader.load_tensor(&wv_name, parser) {
-                // GGUF stores as [hidden_size, kv_dim] - use directly
-                layer.attention_weights.wv.copy_from_slice(wv);
-                if layer_idx == 0 {
-                    eprintln!("Loaded {}: {} elements", wv_name, wv.len());
-                }
+                // GGUF stores as [hidden_size, kv_dim], transpose to [kv_dim, hidden_size] for our matmul
+                let kv_dim =
+                    self.config.num_kv_heads * (self.config.hidden_size / self.config.num_heads);
+                let wv_t = transpose_matrix(wv, self.config.hidden_size, kv_dim);
+                layer.attention_weights.wv.copy_from_slice(&wv_t);
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wv_name);
             }
             if let Ok(wo) = tensor_loader.load_tensor(&wo_name, parser) {
-                // GGUF stores as [hidden_size, hidden_size] - use directly
+                // GGUF stores as [hidden_size, hidden_size] - NO TRANSPOSE needed
+                // Our matmul expects [hidden_size, hidden_size] and GGUF already has this
                 layer.attention_weights.wo.copy_from_slice(wo);
-                if layer_idx == 0 {
-                    eprintln!("Loaded {}: {} elements", wo_name, wo.len());
-                }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wo_name);
             }
@@ -912,16 +1008,20 @@ impl Model {
             let ffn_down_name = format!("blk.{}.ffn_down.weight", layer_idx);
 
             if let Ok(gate) = tensor_loader.load_tensor(&ffn_gate_name, parser) {
-                // GGUF stores as [hidden_size, intermediate_size] - use directly
+                // GGUF stores as [hidden_size, intermediate_size] - NO TRANSPOSE needed
+                // Our matmul expects [hidden_size, intermediate_size] and GGUF already has this
                 layer.ffn_weights.w_gate.copy_from_slice(gate);
             }
             if let Ok(up) = tensor_loader.load_tensor(&ffn_up_name, parser) {
-                // GGUF stores as [hidden_size, intermediate_size] - use directly
+                // GGUF stores as [hidden_size, intermediate_size] - NO TRANSPOSE needed
+                // Our matmul expects [hidden_size, intermediate_size] and GGUF already has this
                 layer.ffn_weights.w_up.copy_from_slice(up);
             }
             if let Ok(down) = tensor_loader.load_tensor(&ffn_down_name, parser) {
-                // GGUF stores as [intermediate_size, hidden_size] - use directly
-                layer.ffn_weights.w_down.copy_from_slice(down);
+                // GGUF stores as [intermediate_size, hidden_size], transpose to [hidden_size, intermediate_size] for our matmul
+                let down_t =
+                    transpose_matrix(down, self.config.intermediate_size, self.config.hidden_size);
+                layer.ffn_weights.w_down.copy_from_slice(&down_t);
             }
 
             // FFN norm
@@ -1025,6 +1125,51 @@ impl Model {
         let logits =
             self.matmul(&hidden_states, &self.lm_head, seq_len, hidden_size, vocab_size)?;
 
+        // Debug: print detailed intermediate values
+        if std::env::var("DEBUG_INTERMEDIATE").is_ok() {
+            let last_logits = &logits[(logits.len() - vocab_size)..];
+            let mut indexed_logits: Vec<(usize, f32)> =
+                last_logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
+            indexed_logits
+                .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+            eprintln!("=== INTERMEDIATE VALUES ===");
+            eprintln!("  Hidden states sum: {:.6}", hidden_states.iter().sum::<f32>());
+            eprintln!(
+                "  Hidden states mean: {:.6}",
+                hidden_states.iter().sum::<f32>() / hidden_states.len() as f32
+            );
+            eprintln!("  Hidden states std: {:.6}", {
+                let mean = hidden_states.iter().sum::<f32>() / hidden_states.len() as f32;
+                let variance = hidden_states.iter().map(|x| (x - mean).powi(2)).sum::<f32>()
+                    / hidden_states.len() as f32;
+                variance.sqrt()
+            });
+            eprintln!("  Logits sum: {:.6}", last_logits.iter().sum::<f32>());
+            eprintln!(
+                "  Logits mean: {:.6}",
+                last_logits.iter().sum::<f32>() / last_logits.len() as f32
+            );
+            eprintln!(
+                "  Logits max: {:.6}",
+                last_logits.iter().copied().fold(f32::NEG_INFINITY, f32::max)
+            );
+            eprintln!(
+                "  Logits min: {:.6}",
+                last_logits.iter().copied().fold(f32::INFINITY, f32::min)
+            );
+            eprintln!("  Top 10 logits: {:?}", &indexed_logits[..10]);
+
+            // Check specific tokens we care about
+            let important_tokens = [278, 1234, 13791]; // "the", "answer", "vertices"
+            for &token_id in &important_tokens {
+                if token_id < last_logits.len() {
+                    eprintln!("  Token {} logit: {:.6}", token_id, last_logits[token_id]);
+                }
+            }
+            eprintln!("========================");
+        }
+
         Ok(logits)
     }
 
@@ -1039,15 +1184,24 @@ impl Model {
             return;
         }
 
+        if std::env::var("DEBUG_REP").is_ok() {
+            eprintln!("  Applying repetition penalty {} to {} tokens", penalty, tokens.len());
+        }
+
         for &token_id in tokens {
             let idx = token_id as usize;
             if idx < logits.len() {
+                let old_logit = logits[idx];
                 // If logit is positive, divide by penalty (reduce it)
                 // If logit is negative, multiply by penalty (make it more negative)
                 if logits[idx] > 0.0 {
                     logits[idx] /= penalty;
                 } else {
                     logits[idx] *= penalty;
+                }
+
+                if std::env::var("DEBUG_REP").is_ok() && token_id == 10532 {
+                    eprintln!("    Token 10532: {:.6} -> {:.6}", old_logit, logits[idx]);
                 }
             }
         }
@@ -1234,7 +1388,22 @@ impl Model {
                 // Apply repetition penalty to discourage repeated tokens
                 self.apply_repetition_penalty(&mut last_logits, &tokens, repetition_penalty);
 
+                // Debug: print top 5 logits before sampling
+                if std::env::var("DEBUG_LOGITS").is_ok() {
+                    let mut indexed: Vec<(usize, f32)> =
+                        last_logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
+                    indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                    eprintln!("  Top 5 logits:");
+                    for (i, (idx, val)) in indexed.iter().take(5).enumerate() {
+                        eprintln!("    {}: token {} = {:.6}", i, idx, val);
+                    }
+                }
+
                 next = self.sample(&last_logits, temperature, top_p, top_k)?;
+
+                if std::env::var("DEBUG_LOGITS").is_ok() {
+                    eprintln!("  Sampled token: {}", next);
+                }
 
                 // Check for EOS token
                 if next == tokenizer.special_tokens().eos_token_id {

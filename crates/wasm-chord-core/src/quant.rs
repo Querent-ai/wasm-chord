@@ -8,9 +8,9 @@ pub const Q4_BLOCK_SIZE: usize = 32;
 pub const Q8_BLOCK_SIZE: usize = 32;
 pub const QK_K: usize = 256; // K-quants use 256-element super-blocks
 
-/// Q4_0 block: 32 4-bit values (16 bytes only in this GGUF file)
-/// NOTE: This file appears to use a non-standard Q4_0 format with 16-byte blocks
-/// instead of the standard 18-byte (f16 scale + quants) format
+/// Q4_0 block: 32 4-bit values
+/// NOTE: This GGUF file uses 16-byte blocks (quants only, no per-block scale)
+/// The scale appears to be stored separately or shared across blocks
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct BlockQ4_0 {
@@ -40,7 +40,7 @@ pub struct BlockQ4_K {
 /// Helper function to extract scale and min from Q4_K scales array
 /// Based on ggml get_scale_min_k4
 #[inline]
-fn get_scale_min_k4(j: usize, scales: &[u8; 12]) -> (u8, u8) {
+pub fn get_scale_min_k4(j: usize, scales: &[u8; 12]) -> (u8, u8) {
     let (d, m) = if j < 4 {
         (scales[j] & 63, scales[j + 4] & 63)
     } else {
@@ -64,6 +64,21 @@ pub fn dequantize_q4_k(block: &BlockQ4_K, output: &mut [f32]) -> Result<()> {
     let d = half::f16::from_bits(block.d).to_f32();
     let min = half::f16::from_bits(block.dmin).to_f32();
 
+    // Debug: print d and min values and scales extraction
+    static FIRST_BLOCK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+    if FIRST_BLOCK.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        eprintln!("Q4_K dequant first block:");
+        eprintln!("  d={:.10}, min={:.10}", d, min);
+        eprintln!("  scales bytes: {:02x?}", &block.scales);
+
+        // Test scale extraction for first 4 groups
+        for is in 0..4 {
+            let (sc0, m0) = get_scale_min_k4(is * 2, &block.scales);
+            let (sc1, m1) = get_scale_min_k4(is * 2 + 1, &block.scales);
+            eprintln!("  Group {}: sc0={}, m0={}, sc1={}, m1={}", is, sc0, m0, sc1, m1);
+        }
+    }
+
     // Process 256 elements in groups of 64
     // Each group uses 2 scales (one for lower nibbles, one for upper)
     let mut y_idx = 0;
@@ -75,12 +90,12 @@ pub fn dequantize_q4_k(block: &BlockQ4_K, output: &mut [f32]) -> Result<()> {
         let (sc0, m0) = get_scale_min_k4(is, &block.scales);
         let (sc1, m1) = get_scale_min_k4(is + 1, &block.scales);
 
-        // Scales are stored as: ls = round((63 / max_scale) * scale)
-        // So to dequantize: scale = (ls / 63) * max_scale = (d / 63) * ls
-        let d1 = (d / 63.0) * sc0 as f32;
-        let m1_val = (min / 63.0) * m0 as f32;
-        let d2 = (d / 63.0) * sc1 as f32;
-        let m2 = (min / 63.0) * m1 as f32;
+        // llama.cpp does: d1 = d * sc, m1 = min * m
+        // The d and min values are already in the correct scale
+        let d1 = d * sc0 as f32;
+        let m1_val = min * m0 as f32;
+        let d2 = d * sc1 as f32;
+        let m2 = min * m1 as f32;
 
         // Dequantize 32 lower nibbles
         for _ in 0..32 {
@@ -117,8 +132,7 @@ pub struct BlockQ6_K {
 }
 
 /// Dequantize Q4_0 block to f32
-/// NOTE: This implementation uses a fixed scale since the GGUF file
-/// appears to use 16-byte blocks without per-block scales
+/// NOTE: Using default scale for this non-standard Q4_0 format
 pub fn dequantize_q4_0(block: &BlockQ4_0, output: &mut [f32]) -> Result<()> {
     if output.len() != Q4_BLOCK_SIZE {
         return Err(Error::InvalidShape(format!(
@@ -127,19 +141,22 @@ pub fn dequantize_q4_0(block: &BlockQ4_0, output: &mut [f32]) -> Result<()> {
         )));
     }
 
-    // Use a default scale of 1.0 since we don't have per-block scales
-    let scale = 1.0f32;
+    // TODO: This GGUF file appears to use a non-standard format
+    // For now, use a conservative scale value
+    let d = 0.01f32;
 
+    // Dequantize with interleaved layout: first half gets lower nibbles, second half gets upper
+    // This matches llama.cpp's layout: y[i*qk + j + 0] = x0*d; y[i*qk + j + qk/2] = x1*d;
     for i in 0..Q4_BLOCK_SIZE / 2 {
         let byte = block.quants[i];
 
-        // Lower 4 bits
-        let v0 = ((byte & 0x0F) as i8) - 8;
-        output[i * 2] = v0 as f32 * scale;
+        // Lower 4 bits -> first half of output
+        let x0 = ((byte & 0x0F) as i8) - 8;
+        output[i] = x0 as f32 * d;
 
-        // Upper 4 bits
-        let v1 = ((byte >> 4) as i8) - 8;
-        output[i * 2 + 1] = v1 as f32 * scale;
+        // Upper 4 bits -> second half of output
+        let x1 = ((byte >> 4) as i8) - 8;
+        output[i + Q4_BLOCK_SIZE / 2] = x1 as f32 * d;
     }
 
     Ok(())
