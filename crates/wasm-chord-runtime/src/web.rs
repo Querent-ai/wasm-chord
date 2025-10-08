@@ -74,8 +74,13 @@ impl WasmModel {
         top_k: u32,
         repetition_penalty: f32,
     ) {
-        self.config =
-            GenerationConfig { max_tokens, temperature, top_p, top_k, repetition_penalty };
+        self.config = GenerationConfig {
+            max_tokens,
+            temperature,
+            top_p,
+            top_k: top_k as usize,
+            repetition_penalty,
+        };
     }
 
     /// Generate text (blocking)
