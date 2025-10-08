@@ -1,0 +1,13 @@
+[package]
+name = "fused-kernels-test"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "fused-kernels-test"
+path = "main.rs"
+doc = false
+
+[dependencies]
+wasm-chord-cpu = { path = "../../crates/wasm-chord-cpu" }
+wasm-chord-core = { path = "../../crates/wasm-chord-core" }

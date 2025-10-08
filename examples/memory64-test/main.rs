@@ -94,19 +94,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let size_1gb = 1024 * 1024 * 1024 / std::mem::size_of::<f32>();
     tracker.allocate::<f32>(size_1gb)?;
-    println!("   Allocated: {:.2} GB", tracker.allocated_bytes() as f64 / (1024.0 * 1024.0 * 1024.0));
+    println!(
+        "   Allocated: {:.2} GB",
+        tracker.allocated_bytes() as f64 / (1024.0 * 1024.0 * 1024.0)
+    );
     println!("   Usage: {:.1}%", tracker.usage_percent());
 
     let size_500mb = 500 * 1024 * 1024 / std::mem::size_of::<f32>();
     tracker.allocate::<f32>(size_500mb)?;
-    println!("   After +500MB: {:.2} GB ({:.1}%)",
-             tracker.allocated_bytes() as f64 / (1024.0 * 1024.0 * 1024.0),
-             tracker.usage_percent());
+    println!(
+        "   After +500MB: {:.2} GB ({:.1}%)",
+        tracker.allocated_bytes() as f64 / (1024.0 * 1024.0 * 1024.0),
+        tracker.usage_percent()
+    );
 
     tracker.deallocate(500 * 1024 * 1024);
-    println!("   After deallocate: {:.2} GB ({:.1}%)",
-             tracker.allocated_bytes() as f64 / (1024.0 * 1024.0 * 1024.0),
-             tracker.usage_percent());
+    println!(
+        "   After deallocate: {:.2} GB ({:.1}%)",
+        tracker.allocated_bytes() as f64 / (1024.0 * 1024.0 * 1024.0),
+        tracker.usage_percent()
+    );
     println!();
 
     // Summary

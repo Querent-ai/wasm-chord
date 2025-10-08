@@ -21,10 +21,7 @@ pub struct CacheKey {
 
 impl CacheKey {
     pub fn new(model_name: impl Into<String>, model_hash: impl Into<String>) -> Self {
-        Self {
-            model_name: model_name.into(),
-            model_hash: model_hash.into(),
-        }
+        Self { model_name: model_name.into(), model_hash: model_hash.into() }
     }
 
     pub fn as_string(&self) -> String {
@@ -151,10 +148,7 @@ pub struct IndexedDBCache {
 impl IndexedDBCache {
     /// Create a new IndexedDB cache
     pub fn new(db_name: impl Into<String>, store_name: impl Into<String>) -> Self {
-        Self {
-            db_name: db_name.into(),
-            store_name: store_name.into(),
-        }
+        Self { db_name: db_name.into(), store_name: store_name.into() }
     }
 
     /// Initialize the IndexedDB database
@@ -285,10 +279,7 @@ mod dirs {
     use std::path::PathBuf;
 
     pub fn home_dir() -> Option<PathBuf> {
-        std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .ok()
-            .map(PathBuf::from)
+        std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok().map(PathBuf::from)
     }
 }
 

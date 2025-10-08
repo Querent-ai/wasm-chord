@@ -139,12 +139,7 @@ pub struct AsyncTokenStream {
 impl AsyncTokenStream {
     /// Create a new async token stream
     fn new(prompt: String, config: GenerationConfig) -> Self {
-        Self {
-            prompt,
-            config,
-            tokens: Vec::new(),
-            current_index: 0,
-        }
+        Self { prompt, config, tokens: Vec::new(), current_index: 0 }
     }
 
     /// Get next token (async iterator protocol)

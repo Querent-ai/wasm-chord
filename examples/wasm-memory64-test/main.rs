@@ -44,7 +44,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         #[cfg(feature = "memory64")]
         {
-            println!("   {} ({:.2} GB): {}",
+            println!(
+                "   {} ({:.2} GB): {}",
                 name,
                 size_gb,
                 if can_fit { "✅ Fits in 16GB" } else { "❌ Too large" }
@@ -53,7 +54,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         #[cfg(not(feature = "memory64"))]
         {
-            println!("   {} ({:.2} GB): {}",
+            println!(
+                "   {} ({:.2} GB): {}",
                 name,
                 size_gb,
                 if can_fit { "✅ Fits in 4GB" } else { "❌ Exceeds 4GB limit" }
@@ -125,11 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(not(feature = "memory64"))]
         let expected = size <= 4 * 1024 * 1024 * 1024;
 
-        let status = if can_allocate == expected {
-            "✅"
-        } else {
-            "❌"
-        };
+        let status = if can_allocate == expected { "✅" } else { "❌" };
 
         println!("   {} {}: {}", status, name, if can_allocate { "Allowed" } else { "Rejected" });
 
@@ -184,7 +182,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("\n💡 To enable Memory64:");
-    println!("   cargo run --manifest-path examples/wasm-memory64-test/Cargo.toml --features memory64");
+    println!(
+        "   cargo run --manifest-path examples/wasm-memory64-test/Cargo.toml --features memory64"
+    );
 
     Ok(())
 }

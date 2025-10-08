@@ -28,9 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut parser = GGUFParser::new(reader);
         let meta = parser.parse_header()?;
 
-        let config_data = parser
-            .extract_config()
-            .ok_or("Failed to extract config from GGUF")?;
+        let config_data = parser.extract_config().ok_or("Failed to extract config from GGUF")?;
         let config: TransformerConfig = config_data.into();
         println!("✅ Config: {} layers, {} vocab", config.num_layers, config.vocab_size);
 
@@ -72,11 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Test prompts
-        let test_cases = vec![
-            ("Hello", 5),
-            ("The capital of France is", 3),
-            ("2+2=", 2),
-        ];
+        let test_cases = vec![("Hello", 5), ("The capital of France is", 3), ("2+2=", 2)];
 
         println!("\n🧪 Running GPU-accelerated generation tests:");
         println!("=============================================\n");

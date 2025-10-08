@@ -40,10 +40,7 @@ pub struct MemoryAllocator {
 impl MemoryAllocator {
     /// Create a new memory allocator
     pub fn new(config: MemoryConfig) -> Self {
-        Self {
-            config,
-            allocated_bytes: 0,
-        }
+        Self { config, allocated_bytes: 0 }
     }
 
     /// Check if allocation would exceed memory limit
@@ -119,7 +116,8 @@ pub fn estimate_model_memory(
 
     // Per-layer weights
     let attention_bytes = 4 * hidden_size * hidden_size * bytes_per_param; // Q, K, V, O
-    let ffn_bytes = (hidden_size * intermediate_size + intermediate_size * hidden_size) * bytes_per_param;
+    let ffn_bytes =
+        (hidden_size * intermediate_size + intermediate_size * hidden_size) * bytes_per_param;
     let layer_bytes = (attention_bytes + ffn_bytes) * num_layers;
 
     // Output head (often shared with embeddings, but count separately for safety)
@@ -152,11 +150,8 @@ mod tests {
 
     #[test]
     fn test_memory_allocator_limit() {
-        let config = MemoryConfig {
-            use_memory64: false,
-            max_memory_bytes: 1000,
-            initial_memory_bytes: 100,
-        };
+        let config =
+            MemoryConfig { use_memory64: false, max_memory_bytes: 1000, initial_memory_bytes: 100 };
         let mut allocator = MemoryAllocator::new(config);
 
         // Try to allocate more than limit
@@ -166,11 +161,8 @@ mod tests {
 
     #[test]
     fn test_memory_usage_percent() -> Result<()> {
-        let config = MemoryConfig {
-            use_memory64: false,
-            max_memory_bytes: 1000,
-            initial_memory_bytes: 100,
-        };
+        let config =
+            MemoryConfig { use_memory64: false, max_memory_bytes: 1000, initial_memory_bytes: 100 };
         let mut allocator = MemoryAllocator::new(config);
 
         // Allocate 25% of memory
@@ -184,10 +176,10 @@ mod tests {
     fn test_model_memory_estimation() {
         // Small model (TinyLlama-like)
         let mem = estimate_model_memory(
-            32000,  // vocab_size
-            2048,   // hidden_size
-            22,     // num_layers
-            5632,   // intermediate_size
+            32000, // vocab_size
+            2048,  // hidden_size
+            22,    // num_layers
+            5632,  // intermediate_size
         );
 
         // TinyLlama 1.1B has ~1.1B parameters, so ~4.4GB in FP32

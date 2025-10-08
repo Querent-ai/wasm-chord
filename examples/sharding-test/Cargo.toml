@@ -1,0 +1,12 @@
+[package]
+name = "sharding-test"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "sharding-test"
+path = "main.rs"
+doc = false
+
+[dependencies]
+wasm-chord-runtime = { path = "../../crates/wasm-chord-runtime" }

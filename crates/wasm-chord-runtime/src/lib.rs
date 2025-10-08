@@ -8,23 +8,27 @@ mod chat;
 mod context;
 mod inference;
 mod memory;
+mod multi_memory;
 mod sampling;
+mod sharding;
 mod transformer;
 
 #[cfg(target_arch = "wasm32")]
 mod web;
 
 pub use abi::*;
-pub use cache::{CacheBackend, CacheKey, ModelCache};
 #[cfg(not(target_arch = "wasm32"))]
 pub use cache::FileSystemCache;
 #[cfg(target_arch = "wasm32")]
 pub use cache::IndexedDBCache;
+pub use cache::{CacheBackend, CacheKey, ModelCache};
 pub use chat::{ChatMessage, ChatRole, ChatTemplate};
 pub use context::RuntimeContext;
 pub use inference::{GenOptions, GenerationState, InferenceSession};
 pub use memory::{estimate_model_memory, requires_memory64, MemoryAllocator, MemoryConfig};
+pub use multi_memory::{MemoryRegion, MemoryRegionConfig, MultiMemoryLayout};
 pub use sampling::{LogitsProcessor, Sampling};
+pub use sharding::{ShardConfig, ShardingManager, ShardingStrategy};
 pub use transformer::{
     AttentionWeights, FFNWeights, FeedForward, GenerationConfig, KVCache, Model,
     MultiHeadAttention, TransformerConfig, TransformerLayer,

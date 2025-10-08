@@ -119,11 +119,11 @@ fn main() {
 - [x] Model caching (IndexedDB/FS)
 - [x] Memory64 support
 
-### Phase 3 - Optimization
-- [ ] Multi-memory layout
-- [ ] Attention KV cache
-- [ ] Fused kernels (dequant+GEMM)
-- [ ] Layer sharding for large models
+### Phase 3 - Optimization ✅
+- [x] Multi-memory layout
+- [x] Attention KV cache
+- [x] Fused kernels (dequant+GEMM)
+- [x] Layer sharding for large models
 
 ### Phase 4 - Ecosystem
 - [ ] Python bindings (via Pyodide)

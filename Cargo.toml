@@ -50,6 +50,11 @@ members = [
     "examples/cache-test",
     "examples/memory64-test",
     "examples/wasm-memory64-test",
+    "examples/multi-memory-test",
+    "examples/sharding-test",
+    "examples/wasm-10gb-test",
+    "examples/fused-kernels-test",
+    "examples/cache-performance-test",
 ]
 
 [workspace.package]

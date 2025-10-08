@@ -5,7 +5,9 @@ use std::io::BufReader;
 use wasm_chord_core::{GGUFParser, TensorLoader, Tokenizer};
 use wasm_chord_runtime::{Model, TransformerConfig};
 
-fn load_model(model_path: &str) -> Result<(Model, TransformerConfig, Tokenizer), Box<dyn std::error::Error>> {
+fn load_model(
+    model_path: &str,
+) -> Result<(Model, TransformerConfig, Tokenizer), Box<dyn std::error::Error>> {
     let file = File::open(model_path)?;
     let reader = BufReader::new(file);
     let mut parser = GGUFParser::new(reader);
@@ -122,7 +124,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Find top tokens from both
         let get_top_tokens = |logits: &[f32], k: usize| -> Vec<(usize, f32)> {
-            let mut indexed: Vec<(usize, f32)> = logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
+            let mut indexed: Vec<(usize, f32)> =
+                logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
             indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
             indexed.into_iter().take(k).collect()
         };
@@ -139,8 +142,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let cpu_token = tokenizer.id_to_token(cpu_id as u32).unwrap_or("<unk>");
             let gpu_token = tokenizer.id_to_token(gpu_id as u32).unwrap_or("<unk>");
             let match_str = if cpu_id == gpu_id { "✅" } else { "❌" };
-            println!("   {:4} | {:8} ({:10.6}) | {:8} ({:10.6}) | {}",
-                     i+1, cpu_token, cpu_logit, gpu_token, gpu_logit, match_str);
+            println!(
+                "   {:4} | {:8} ({:10.6}) | {:8} ({:10.6}) | {}",
+                i + 1,
+                cpu_token,
+                cpu_logit,
+                gpu_token,
+                gpu_logit,
+                match_str
+            );
         }
 
         // Check if top token matches
@@ -149,17 +159,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("\n📌 Top Token Comparison:");
         if cpu_top_id == gpu_top_id {
-            println!("   ✅ MATCH! Both predict token {} ({:?})",
-                     cpu_top_id, tokenizer.id_to_token(cpu_top_id as u32).unwrap_or("<unk>"));
+            println!(
+                "   ✅ MATCH! Both predict token {} ({:?})",
+                cpu_top_id,
+                tokenizer.id_to_token(cpu_top_id as u32).unwrap_or("<unk>")
+            );
             println!("   CPU logit: {:.6}", cpu_top_logit);
             println!("   GPU logit: {:.6}", gpu_top_logit);
             println!("   Difference: {:.6}", (cpu_top_logit - gpu_top_logit).abs());
         } else {
             println!("   ❌ MISMATCH!");
-            println!("   CPU: token {} ({:?}) logit={:.6}",
-                     cpu_top_id, tokenizer.id_to_token(cpu_top_id as u32).unwrap_or("<unk>"), cpu_top_logit);
-            println!("   GPU: token {} ({:?}) logit={:.6}",
-                     gpu_top_id, tokenizer.id_to_token(gpu_top_id as u32).unwrap_or("<unk>"), gpu_top_logit);
+            println!(
+                "   CPU: token {} ({:?}) logit={:.6}",
+                cpu_top_id,
+                tokenizer.id_to_token(cpu_top_id as u32).unwrap_or("<unk>"),
+                cpu_top_logit
+            );
+            println!(
+                "   GPU: token {} ({:?}) logit={:.6}",
+                gpu_top_id,
+                tokenizer.id_to_token(gpu_top_id as u32).unwrap_or("<unk>"),
+                gpu_top_logit
+            );
         }
 
         // Verdict

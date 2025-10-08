@@ -2,9 +2,13 @@
 //!
 //! Provides SIMD-accelerated kernels for tensor operations on CPU.
 
+pub mod fused;
 pub mod gemm;
 pub mod kernels;
 
+pub use fused::{
+    fused_attention_score, fused_dequant_matmul_q4k, fused_rmsnorm_linear, fused_swiglu_proj,
+};
 pub use gemm::{matmul_f32, matmul_transposed};
 
 use wasm_chord_core::error::Result;
