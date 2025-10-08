@@ -48,6 +48,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Check specific tokens from our base model generation
+    println!("\n🔍 Checking tokens from our base model generation:");
+    let base_model_tokens = [24081, 11032, 12047, 8975, 22803];
+    for token_id in base_model_tokens {
+        if let Some(token_str) = tokenizer.id_to_token(token_id) {
+            println!("   Token {}: \"{}\"", token_id, token_str);
+        }
+    }
+
     // Check some common English words
     println!("\n📝 Checking common English words:");
     let common_words = ["the", "weather", "today", "is", "good", "bad", "sunny", "rainy"];
@@ -59,11 +68,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Check vocabulary structure
-    println!("\n📚 Vocabulary sample (first 20 tokens):");
-    for i in 0..20.min(tokenizer.vocab_size()) {
-        if let Some(token_str) = tokenizer.id_to_token(i as u32) {
-            println!("   Token {}: \"{}\"", i, token_str);
+    // Check what Ollama predicted with SentencePiece prefix
+    println!("\n🔍 Checking Ollama's prediction with SentencePiece prefix:");
+    let ollama_words_sp = ["▁Bonjour", "▁there", "▁world", "▁how", "▁are", "▁you"];
+    for word in ollama_words_sp {
+        if let Some(token_id) = tokenizer.token_to_id(word) {
+            println!("   \"{}\" -> token {}", word, token_id);
+        } else {
+            println!("   \"{}\" -> NOT FOUND", word);
         }
     }
 

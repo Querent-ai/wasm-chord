@@ -77,7 +77,10 @@ fn test_minimal_generation() {
     // Check KV cache state before generation
     println!("🗄️  KV cache state before generation:");
     for (i, cache) in model.kv_caches.iter().enumerate() {
-        println!("  Layer {}: seq_pos={}, max_size={}", i, cache.seq_pos, cache.max_size);
+        println!(
+            "  Layer {}: current_seq_len={}, max_seq_len={}",
+            i, cache.current_seq_len, cache.max_seq_len
+        );
     }
 
     // Encode

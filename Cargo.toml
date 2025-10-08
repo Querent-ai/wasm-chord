@@ -17,6 +17,19 @@ members = [
     "examples/tokenizer-debug",
     "examples/chat-model-test",
     "examples/debug-generation",
+    "examples/dump-gguf-shapes",
+    "examples/logit-comparison",
+    "examples/first-token-comparison",
+    "examples/implementation-comparison",
+    "examples/gguf-diagnostic",
+    "examples/debug-gibberish",
+    "examples/test-embeddings",
+    "examples/test-fix",
+    "examples/debug-embedding-step",
+    "examples/check-embedding-format",
+    "examples/test-rmsnorm",
+    "examples/vocab-check",
+    "examples/argmax-test",
 ]
 
 [workspace.package]

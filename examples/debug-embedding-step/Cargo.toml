@@ -1,0 +1,13 @@
+[package]
+name = "debug-embedding-step"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "debug-embedding-step"
+path = "main.rs"
+
+[dependencies]
+wasm-chord-core = { path = "../../crates/wasm-chord-core" }
+wasm-chord-runtime = { path = "../../crates/wasm-chord-runtime" }
+

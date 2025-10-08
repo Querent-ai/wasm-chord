@@ -1,0 +1,12 @@
+[package]
+name = "test-rmsnorm"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "test-rmsnorm"
+path = "main.rs"
+
+[dependencies]
+wasm-chord-runtime = { path = "../../crates/wasm-chord-runtime" }
+

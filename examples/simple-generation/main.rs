@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=====================================\n");
 
     // Model path - use Q4_K model to match llama.cpp test
-    let model_path = "models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf";
+    let model_path = "models/tinyllama-1.1b.Q4_K_M.gguf"; // Base model, higher quality
     println!("📂 Loading model: {}", model_path);
 
     // === Load Model ===
@@ -57,11 +57,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ Weights loaded\n");
 
     // === Generate Text ===
-    let prompt = "Hi";
+    let prompt = "The quick brown fox";
 
     let config = GenerationConfig {
-        max_tokens: 8,    // Reasonable limit without KV cache
-        temperature: 0.7, // Add some randomness
+        max_tokens: 5,    // Generate 5 tokens
+        temperature: 0.0, // Deterministic output
         top_p: 0.9,
         top_k: 40,
         repetition_penalty: 1.1,
@@ -71,7 +71,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // std::env::set_var("DEBUG_FORWARD", "1");
     // std::env::set_var("DEBUG_KV", "1");
 
-    println!("🎲 Generating text...");
+    // Debug: Check tokenization
+    let tokens = tokenizer.encode(prompt, false)?;
+    println!("🔍 Tokenization:");
+    println!("   Input: {:?}", prompt);
+    println!("   Tokens: {:?}", tokens);
+    println!("   Count: {}", tokens.len());
+
+    println!("\n🎲 Generating text...");
     println!("   Prompt: {:?}", prompt);
     println!("   Config: {:?}", config);
 

@@ -1,0 +1,12 @@
+[package]
+name = "dump-gguf-shapes"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "dump-gguf-shapes"
+path = "main.rs"
+
+[dependencies]
+wasm-chord-core = { path = "../../crates/wasm-chord-core" }
+

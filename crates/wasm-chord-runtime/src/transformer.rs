@@ -67,12 +67,12 @@ impl From<wasm_chord_core::TransformerConfigData> for TransformerConfig {
     }
 }
 
-/// KV cache for a single layer - Simplified Candle-inspired implementation
+/// KV cache for a single layer - Microsoft AICI inspired implementation
 #[derive(Debug, Clone)]
 pub struct KVCache {
-    /// Cached keys [seq_len, num_kv_heads, head_dim]
+    /// Cached keys [max_seq_len, num_kv_heads, head_dim]
     pub keys: Vec<f32>,
-    /// Cached values [seq_len, num_kv_heads, head_dim]
+    /// Cached values [max_seq_len, num_kv_heads, head_dim]
     pub values: Vec<f32>,
     /// Current sequence length (number of tokens cached)
     pub current_seq_len: usize,
@@ -190,7 +190,7 @@ impl MultiHeadAttention {
         &self,
         hidden_states: &[f32],
         weights: &AttentionWeights,
-        _kv_cache: &mut KVCache,
+        kv_cache: &mut KVCache,
         position: usize,
         #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
     ) -> Result<Vec<f32>> {
@@ -247,6 +247,13 @@ impl MultiHeadAttention {
             gpu,
         )?;
 
+        // DEBUG: Dump Q, K, V for layer 0
+        if std::env::var("DUMP_LAYER0").is_ok() {
+            eprintln!("LAYER0 Q preview: {:?}", &q[..q.len().min(16)]);
+            eprintln!("LAYER0 K preview: {:?}", &k[..k.len().min(16)]);
+            eprintln!("LAYER0 V preview: {:?}", &v[..v.len().min(16)]);
+        }
+
         // Apply RoPE (Rotary Position Embedding)
         // Apply different positions for each token in the sequence
         let mut q = q;
@@ -265,15 +272,30 @@ impl MultiHeadAttention {
             }
             self.compute_attention(&q, &k, &v, seq_len, position)?
         } else {
-            // MINIMAL KV CACHE: Just concatenate and use simple attention
+            // Use KV cache properly - this is the key fix!
             if std::env::var("DEBUG_KV").is_ok() {
-                eprintln!("  Using minimal KV cache");
+                eprintln!("  Using KV cache - appending new K/V to cache");
             }
 
-            // For now, just use current K/V without caching to avoid hangs
-            // TODO: Implement proper KV cache
-            self.compute_attention(&q, &k, &v, seq_len, position)?
+            // Append new K/V to cache and get all cached K/V for attention
+            let (cached_k, cached_v) = kv_cache.append(&k, &v)?;
+
+            if std::env::var("DEBUG_KV").is_ok() {
+                eprintln!(
+                    "  KV cache: current_seq_len={}, cached_k.len()={}",
+                    kv_cache.current_seq_len,
+                    cached_k.len()
+                );
+            }
+
+            // Use cached K/V for attention computation
+            self.compute_attention(&q, &cached_k, &cached_v, seq_len, position)?
         };
+
+        // DEBUG: Dump attention output for layer 0
+        if std::env::var("DUMP_LAYER0").is_ok() {
+            eprintln!("LAYER0 attn_output preview: {:?}", &output[..output.len().min(16)]);
+        }
 
         // Output projection
         let result = self.matmul(
@@ -328,8 +350,9 @@ impl MultiHeadAttention {
                     let idx1 = base_idx + i + 1;
 
                     // RoPE frequency calculation
-                    // freq = 1.0 / (theta ^ (i / head_dim))  where i goes 0, 2, 4, ...
-                    let freq = 1.0 / self.config.rope_theta.powf((i as f32) / (head_dim as f32));
+                    // Since we step_by(2), i goes 0,2,4,6,... so we use i (not 2*i)
+                    // freq = 1.0 / (theta ^ (i / head_dim))
+                    let freq = 1.0 / self.config.rope_theta.powf(i as f32 / head_dim as f32);
                     let angle = token_pos as f32 * freq;
 
                     let cos = angle.cos();
@@ -496,6 +519,16 @@ impl MultiHeadAttention {
                     if j > query_abs_pos {
                         scores[j] = f32::NEG_INFINITY;
                     }
+
+                    // Debug causal mask
+                    if std::env::var("DEBUG_CAUSAL").is_ok() && h == 0 && i == 0 {
+                        eprintln!(
+                            "  Causal mask: query_pos={}, kv_pos={}, masked={}",
+                            query_abs_pos,
+                            j,
+                            j > query_abs_pos
+                        );
+                    }
                 }
 
                 // Softmax over scores
@@ -655,9 +688,11 @@ impl FeedForward {
             gpu,
         )?;
 
-        // SiLU activation: gate * sigmoid(gate) * up
+        // SwiGLU activation: silu(gate) * up
+        // where silu(x) = x * sigmoid(x) = x / (1 + exp(-x))
         for i in 0..gate.len() {
-            let silu = gate[i] / (1.0 + (-gate[i]).exp());
+            let sigmoid = 1.0 / (1.0 + (-gate[i]).exp());
+            let silu = gate[i] * sigmoid;
             gate[i] = silu * up[i];
         }
 
@@ -733,6 +768,15 @@ impl TransformerLayer {
         position: usize,
         #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
     ) -> Result<Vec<f32>> {
+        // DEBUG: Dump layer input for layer 0
+        if std::env::var("DUMP_LAYER0").is_ok() {
+            eprintln!(
+                "LAYER {} input hidden_states preview: {:?}",
+                0,
+                &hidden_states[..hidden_states.len().min(16)]
+            );
+        }
+
         // Pre-norm architecture (like LLaMA)
 
         // 1. Attention block with residual
@@ -767,7 +811,7 @@ impl TransformerLayer {
         Ok(hidden)
     }
 
-    fn rms_norm(&self, input: &[f32], weight: &[f32]) -> Result<Vec<f32>> {
+    pub fn rms_norm(&self, input: &[f32], weight: &[f32]) -> Result<Vec<f32>> {
         let hidden_size = weight.len();
         let seq_len = input.len() / hidden_size;
         let mut output = vec![0.0; input.len()];
@@ -776,13 +820,17 @@ impl TransformerLayer {
             let offset = seq * hidden_size;
             let slice = &input[offset..offset + hidden_size];
 
-            // Compute RMS
+            // Compute RMS exactly like llama.cpp:
+            // 1. Sum of squares
+            // 2. Mean = sum / n
+            // 3. Scale = 1 / sqrt(mean + eps)
             let sum_sq: f32 = slice.iter().map(|&x| x * x).sum();
-            let rms = (sum_sq / hidden_size as f32).sqrt() + 1e-5;
+            let mean = sum_sq / hidden_size as f32;
+            let scale = 1.0 / (mean + self.attention.config.rms_norm_eps).sqrt();
 
-            // Normalize and scale
+            // Normalize and scale by weight
             for i in 0..hidden_size {
-                output[offset + i] = (slice[i] / rms) * weight[i];
+                output[offset + i] = slice[i] * scale * weight[i];
             }
         }
 
@@ -837,6 +885,132 @@ fn transpose_matrix(matrix: &[f32], rows: usize, cols: usize) -> Vec<f32> {
         }
     }
     transposed
+}
+
+/// Compute basic stats for a slice of f32s
+fn tensor_stats(name: &str, data: &[f32]) {
+    let len = data.len();
+    let mut sum = 0.0f64;
+    let mut sum_sq = 0.0f64;
+    let mut nan_count = 0usize;
+    let mut inf_count = 0usize;
+    let mut zero_count = 0usize;
+
+    for &v in data {
+        if v.is_nan() {
+            nan_count += 1;
+            continue;
+        }
+        if v.is_infinite() {
+            inf_count += 1;
+            continue;
+        }
+        if v == 0.0 {
+            zero_count += 1;
+        }
+        sum += v as f64;
+        sum_sq += (v as f64) * (v as f64);
+    }
+
+    let mean = if len > 0 { sum / (len as f64) } else { 0.0 };
+    let variance = if len > 0 { (sum_sq / (len as f64)) - (mean * mean) } else { 0.0 };
+    let std = variance.max(0.0).sqrt();
+
+    eprintln!(
+        "STATS '{}' len={} nan={} inf={} zeros={} mean={:.6} std={:.6} min={:.6} max={:.6}",
+        name,
+        len,
+        nan_count,
+        inf_count,
+        zero_count,
+        mean,
+        std,
+        data.iter().copied().fold(f32::INFINITY, f32::min),
+        data.iter().copied().fold(f32::NEG_INFINITY, f32::max)
+    );
+
+    // Print a small preview
+    let preview: Vec<String> = data.iter().take(8).map(|v| format!("{:.6}", v)).collect();
+    eprintln!("  preview: {:?}", preview);
+}
+
+/// Naive matmul reference (row-major)
+fn matmul_naive(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
+    let mut r = vec![0.0f32; m * n];
+    for i in 0..m {
+        for j in 0..n {
+            let mut sum = 0.0f32;
+            for t in 0..k {
+                sum += a[i * k + t] * b[t * n + j];
+            }
+            r[i * n + j] = sum;
+        }
+    }
+    r
+}
+
+/// Test matmul implementation for small sizes and random values
+fn matmul_self_test() -> Result<()> {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+
+    let tests = vec![(2, 3, 4), (4, 4, 4), (3, 5, 2)];
+    for (m, k, n) in tests {
+        let mut a = vec![0.0f32; m * k];
+        let mut b = vec![0.0f32; k * n];
+        for v in &mut a {
+            *v = rng.gen_range(-1.0..1.0);
+        }
+        for v in &mut b {
+            *v = rng.gen_range(-1.0..1.0);
+        }
+
+        let mut out = vec![0.0f32; m * n];
+        matmul_f32(&a, &b, &mut out, m, k, n)?;
+
+        let expected = matmul_naive(&a, &b, m, k, n);
+
+        // compute max absolute diff
+        let mut max_diff = 0.0f32;
+        for idx in 0..(m * n) {
+            let d = (out[idx] - expected[idx]).abs();
+            if d > max_diff {
+                max_diff = d;
+            }
+        }
+        eprintln!("MATMUL TEST {}x{}x{} max_diff={:.6}", m, k, n, max_diff);
+        if max_diff > 1e-3 {
+            // tolerance for float rounding
+            return Err(wasm_chord_core::error::Error::Runtime(format!(
+                "Matmul mismatch max_diff={:.6}",
+                max_diff
+            )));
+        }
+    }
+    Ok(())
+}
+
+// Helper function to manually compute a single logit for verification
+fn compute_manual_logit(
+    hidden_states: &[f32],
+    lm_head: &[f32],
+    token_id: usize,
+    hidden_size: usize,
+) -> f32 {
+    // The matmul treats hidden_states as [seq_len, hidden_size] where seq_len=1
+    // and lm_head as [hidden_size, vocab_size]
+    // So for the first (and only) sequence position, we compute:
+    // logit = sum(hidden_states[i] * lm_head[i * vocab_size + token_id]) for i in 0..hidden_size
+
+    let vocab_size = 32000;
+    let mut sum = 0.0f32;
+    for (i, hidden_state) in hidden_states.iter().enumerate().take(hidden_size) {
+        let weight_idx = i * vocab_size + token_id;
+        if weight_idx < lm_head.len() {
+            sum += hidden_state * lm_head[weight_idx];
+        }
+    }
+    sum
 }
 
 impl Model {
@@ -913,23 +1087,48 @@ impl Model {
     ) -> Result<()> {
         use wasm_chord_core::error::Error;
 
-        // Load token embeddings
-        if let Ok(embedding_data) = tensor_loader.load_tensor("token_embd.weight", parser) {
-            let has_nan = embedding_data.iter().any(|&x| x.is_nan());
-            let has_inf = embedding_data.iter().any(|&x| x.is_infinite());
-            let sum: f32 = embedding_data.iter().take(100).sum();
-            let min = embedding_data.iter().copied().fold(f32::INFINITY, f32::min);
-            let max = embedding_data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-            eprintln!("Loaded token_embd.weight: {} elements, nan={}, inf={}, sum100={:.6}, range=[{:.6}, {:.6}]",
-                      embedding_data.len(), has_nan, has_inf, sum, min, max);
+        // Run matmul self-test first
+        eprintln!("🧪 Running matmul self-test...");
+        matmul_self_test()?;
+        eprintln!("✅ Matmul self-test passed!");
 
-            // GGUF stores token embeddings as [hidden_size, vocab_size]
-            // We need [vocab_size, hidden_size] for token lookup
-            let embeddings_transposed =
-                transpose_matrix(embedding_data, self.config.hidden_size, self.config.vocab_size);
-            self.token_embeddings.copy_from_slice(&embeddings_transposed);
+        // Load token embeddings - try different tensor names
+        let embedding_data = if let Ok(data) =
+            tensor_loader.load_tensor("token_embd.weight", parser)
+        {
+            println!("✅ Found 'token_embd.weight'");
+            data
+        } else if let Ok(data) = tensor_loader.load_tensor("model.embed_tokens.weight", parser) {
+            println!("✅ Found 'model.embed_tokens.weight'");
+            data
+        } else if let Ok(data) = tensor_loader.load_tensor("embed_tokens.weight", parser) {
+            println!("✅ Found 'embed_tokens.weight'");
+            data
         } else {
             return Err(Error::ParseError("Missing token embeddings".to_string()));
+        };
+
+        {
+            eprintln!("LOADED 'token_embd.weight' raw.len={}", embedding_data.len());
+            tensor_stats("token_embd.weight (raw)", embedding_data);
+            eprintln!(
+                "  Raw preview (first 20): {:?}",
+                &embedding_data[..20.min(embedding_data.len())]
+            );
+
+            println!(
+                "🔍 Loading token embeddings as-is: [hidden_size={}, vocab_size={}]",
+                self.config.hidden_size, self.config.vocab_size
+            );
+            // GGUF stores token_embd.weight as [hidden_size, vocab_size]
+            // Our embedding lookup (line 1339-1340) correctly handles this format
+            // by gathering column token_id from each row
+            self.token_embeddings.copy_from_slice(embedding_data);
+            eprintln!(
+                "  Embeddings preview (first 20): {:?}",
+                &self.token_embeddings[..20.min(self.token_embeddings.len())]
+            );
+            tensor_stats("token_embd.weight (model)", &self.token_embeddings);
         }
 
         // Load output norm
@@ -937,23 +1136,56 @@ impl Model {
             self.output_norm.copy_from_slice(norm_data);
         }
 
-        // Load LM head (or tie with embeddings)
+        // Load LM head - try different tensor names
         if let Ok(lm_head_data) = tensor_loader.load_tensor("output.weight", parser) {
-            // GGUF stores output.weight as [hidden_size, vocab_size]
-            // We need [vocab_size, hidden_size] for matmul (ggml auto-transposes, we don't)
-            let lm_head_transposed =
-                transpose_matrix(lm_head_data, self.config.hidden_size, self.config.vocab_size);
-            self.lm_head.copy_from_slice(&lm_head_transposed);
+            println!("✅ Found 'output.weight'");
+            eprintln!("LOADED 'output.weight' raw.len={}", lm_head_data.len());
+            tensor_stats("output.weight (raw)", lm_head_data);
+
+            println!("🔍 Loading LM head tensor: {} elements", lm_head_data.len());
+            // GGUF stores output.weight as [hidden_size, vocab_size] already
+            // No transpose needed!
+            self.lm_head.copy_from_slice(lm_head_data);
+            tensor_stats("output.weight (model)", &self.lm_head);
+            println!(
+                "✅ LM head loaded (shape: [hidden_size={}, vocab_size={}])",
+                self.config.hidden_size, self.config.vocab_size
+            );
+        } else if let Ok(lm_head_data) = tensor_loader.load_tensor("lm_head.weight", parser) {
+            println!("✅ Found 'lm_head.weight'");
+            eprintln!("LOADED 'lm_head.weight' raw.len={}", lm_head_data.len());
+            tensor_stats("lm_head.weight (raw)", lm_head_data);
+            self.lm_head.copy_from_slice(lm_head_data);
+            tensor_stats("lm_head.weight (model)", &self.lm_head);
+            println!("✅ LM head loaded");
+        } else if let Ok(lm_head_data) = tensor_loader.load_tensor("model.lm_head.weight", parser) {
+            println!("✅ Found 'model.lm_head.weight'");
+            eprintln!("LOADED 'model.lm_head.weight' raw.len={}", lm_head_data.len());
+            tensor_stats("model.lm_head.weight (raw)", lm_head_data);
+            self.lm_head.copy_from_slice(lm_head_data);
+            tensor_stats("model.lm_head.weight (model)", &self.lm_head);
+            println!("✅ LM head loaded");
         } else {
             // Weight tying: LM head shares weights with token embeddings
-            // Token embeddings are [hidden_size, vocab_size], transpose to [vocab_size, hidden_size]
+            println!("🔍 Using weight tying - LM head from token embeddings");
             let lm_head_transposed = transpose_matrix(
                 &self.token_embeddings,
                 self.config.hidden_size,
                 self.config.vocab_size,
             );
             self.lm_head.copy_from_slice(&lm_head_transposed);
+            tensor_stats("lm_head (from embeddings, transposed)", &self.lm_head);
+            println!("✅ LM head loaded from token embeddings (weight tying)");
         }
+
+        // Print LM head shape check
+        eprintln!(
+            "LM_HEAD len={}, expected={} (vocab_size * hidden_size={})",
+            self.lm_head.len(),
+            self.config.vocab_size * self.config.hidden_size,
+            self.config.vocab_size * self.config.hidden_size
+        );
+        eprintln!("token_embeddings.len()={}", self.token_embeddings.len());
 
         // Load each layer's weights
         for layer_idx in 0..self.config.num_layers {
@@ -988,34 +1220,54 @@ impl Model {
             };
 
             if let Ok(wq) = tensor_loader.load_tensor(&wq_name, parser) {
-                // GGUF stores as [hidden_size, hidden_size] - NO TRANSPOSE needed
-                // Our matmul expects [hidden_size, hidden_size] and GGUF already has this
+                if layer_idx == 0 {
+                    eprintln!("LOADED '{}' raw.len={}", wq_name, wq.len());
+                    tensor_stats(&format!("{} (raw)", wq_name), wq);
+                }
                 layer.attention_weights.wq.copy_from_slice(wq);
+                if layer_idx == 0 {
+                    tensor_stats(&format!("{} (model)", wq_name), &layer.attention_weights.wq);
+                }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wq_name);
             }
             if let Ok(wk) = tensor_loader.load_tensor(&wk_name, parser) {
-                // GGUF stores as [hidden_size, kv_dim], transpose to [kv_dim, hidden_size] for our matmul
-                let kv_dim =
-                    self.config.num_kv_heads * (self.config.hidden_size / self.config.num_heads);
-                let wk_t = transpose_matrix(wk, self.config.hidden_size, kv_dim);
-                layer.attention_weights.wk.copy_from_slice(&wk_t);
+                if layer_idx == 0 {
+                    eprintln!("LOADED '{}' raw.len={}", wk_name, wk.len());
+                    tensor_stats(&format!("{} (raw)", wk_name), wk);
+                }
+                // GGUF stores as [hidden_size, kv_dim] - NO TRANSPOSE NEEDED!
+                // Our matmul expects [hidden_size, kv_dim], which matches GGUF
+                layer.attention_weights.wk.copy_from_slice(wk);
+                if layer_idx == 0 {
+                    tensor_stats(&format!("{} (model)", wk_name), &layer.attention_weights.wk);
+                }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wk_name);
             }
             if let Ok(wv) = tensor_loader.load_tensor(&wv_name, parser) {
-                // GGUF stores as [hidden_size, kv_dim], transpose to [kv_dim, hidden_size] for our matmul
-                let kv_dim =
-                    self.config.num_kv_heads * (self.config.hidden_size / self.config.num_heads);
-                let wv_t = transpose_matrix(wv, self.config.hidden_size, kv_dim);
-                layer.attention_weights.wv.copy_from_slice(&wv_t);
+                if layer_idx == 0 {
+                    eprintln!("LOADED '{}' raw.len={}", wv_name, wv.len());
+                    tensor_stats(&format!("{} (raw)", wv_name), wv);
+                }
+                // GGUF stores as [hidden_size, kv_dim] - NO TRANSPOSE NEEDED!
+                // Our matmul expects [hidden_size, kv_dim], which matches GGUF
+                layer.attention_weights.wv.copy_from_slice(wv);
+                if layer_idx == 0 {
+                    tensor_stats(&format!("{} (model)", wv_name), &layer.attention_weights.wv);
+                }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wv_name);
             }
             if let Ok(wo) = tensor_loader.load_tensor(&wo_name, parser) {
-                // GGUF stores as [hidden_size, hidden_size] - NO TRANSPOSE needed
-                // Our matmul expects [hidden_size, hidden_size] and GGUF already has this
+                if layer_idx == 0 {
+                    eprintln!("LOADED '{}' raw.len={}", wo_name, wo.len());
+                    tensor_stats(&format!("{} (raw)", wo_name), wo);
+                }
                 layer.attention_weights.wo.copy_from_slice(wo);
+                if layer_idx == 0 {
+                    tensor_stats(&format!("{} (model)", wo_name), &layer.attention_weights.wo);
+                }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wo_name);
             }
@@ -1032,20 +1284,13 @@ impl Model {
             let ffn_down_name = format!("blk.{}.ffn_down.weight", layer_idx);
 
             if let Ok(gate) = tensor_loader.load_tensor(&ffn_gate_name, parser) {
-                // GGUF stores as [hidden_size, intermediate_size] - NO TRANSPOSE needed
-                // Our matmul expects [hidden_size, intermediate_size] and GGUF already has this
                 layer.ffn_weights.w_gate.copy_from_slice(gate);
             }
             if let Ok(up) = tensor_loader.load_tensor(&ffn_up_name, parser) {
-                // GGUF stores as [hidden_size, intermediate_size] - NO TRANSPOSE needed
-                // Our matmul expects [hidden_size, intermediate_size] and GGUF already has this
                 layer.ffn_weights.w_up.copy_from_slice(up);
             }
             if let Ok(down) = tensor_loader.load_tensor(&ffn_down_name, parser) {
-                // GGUF stores as [intermediate_size, hidden_size], transpose to [hidden_size, intermediate_size] for our matmul
-                let down_t =
-                    transpose_matrix(down, self.config.intermediate_size, self.config.hidden_size);
-                layer.ffn_weights.w_down.copy_from_slice(&down_t);
+                layer.ffn_weights.w_down.copy_from_slice(down);
             }
 
             // FFN norm
@@ -1101,16 +1346,25 @@ impl Model {
         }
 
         // 1. Embed tokens
+        // GGUF stores embeddings as [hidden_size, vocab_size]
+        // So for token_id, we need to gather column token_id from each row
         let mut hidden_states = vec![0.0; seq_len * hidden_size];
-        for (i, &token_id) in token_ids.iter().enumerate() {
-            let emb_start = (token_id as usize) * hidden_size;
-            let emb_end = emb_start + hidden_size;
-            let out_start = i * hidden_size;
-            let out_end = out_start + hidden_size;
+        let vocab_size = self.config.vocab_size;
 
-            if emb_end <= self.token_embeddings.len() {
-                hidden_states[out_start..out_end]
-                    .copy_from_slice(&self.token_embeddings[emb_start..emb_end]);
+        for (seq_idx, &token_id) in token_ids.iter().enumerate() {
+            let out_start = seq_idx * hidden_size;
+
+            // Gather embedding for this token from the [hidden_size, vocab_size] matrix
+            // Element [row, col] is at index row * vocab_size + col
+            // So embedding dimension i for token_id is at: i * vocab_size + token_id
+            for dim_idx in 0..hidden_size {
+                let emb_idx = dim_idx * vocab_size + (token_id as usize);
+                if emb_idx < self.token_embeddings.len() {
+                    hidden_states[out_start + dim_idx] = self.token_embeddings[emb_idx];
+                } else {
+                    eprintln!("WARN: Token {} dim {} out of bounds", token_id, dim_idx);
+                    break;
+                }
             }
         }
 
@@ -1146,8 +1400,122 @@ impl Model {
 
         // 4. Project to vocabulary (LM head)
         let vocab_size = self.config.vocab_size;
+
+        // DEBUG: Check hidden states before LM head
+        if std::env::var("DEBUG_LOGITS").is_ok() {
+            eprintln!("🔍 HIDDEN STATES BEFORE LM HEAD:");
+            eprintln!("  hidden_states.len() = {}", hidden_states.len());
+            eprintln!(
+                "  seq_len = {}, hidden_size = {}, vocab_size = {}",
+                seq_len, hidden_size, vocab_size
+            );
+
+            // Check first few values
+            let preview_len = 10.min(hidden_states.len());
+            eprintln!("  hidden_states preview: {:?}", &hidden_states[..preview_len]);
+
+            // Check statistics
+            let sum: f32 = hidden_states.iter().sum();
+            let mean = sum / hidden_states.len() as f32;
+            let max = hidden_states.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let min = hidden_states.iter().copied().fold(f32::INFINITY, f32::min);
+            let nan_count = hidden_states.iter().filter(|&&x| x.is_nan()).count();
+            let inf_count = hidden_states.iter().filter(|&&x| x.is_infinite()).count();
+
+            eprintln!("  hidden_states stats: sum={:.6}, mean={:.6}, min={:.6}, max={:.6}, nan={}, inf={}", 
+                     sum, mean, min, max, nan_count, inf_count);
+
+            // Check LM head weights
+            eprintln!("🔍 LM HEAD WEIGHTS:");
+            eprintln!("  lm_head.len() = {}", self.lm_head.len());
+            let lm_preview_len = 10.min(self.lm_head.len());
+            eprintln!("  lm_head preview: {:?}", &self.lm_head[..lm_preview_len]);
+
+            let lm_sum: f32 = self.lm_head.iter().sum();
+            let lm_mean = lm_sum / self.lm_head.len() as f32;
+            let lm_max = self.lm_head.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let lm_min = self.lm_head.iter().copied().fold(f32::INFINITY, f32::min);
+            let lm_nan_count = self.lm_head.iter().filter(|&&x| x.is_nan()).count();
+            let lm_inf_count = self.lm_head.iter().filter(|&&x| x.is_infinite()).count();
+
+            eprintln!(
+                "  lm_head stats: sum={:.6}, mean={:.6}, min={:.6}, max={:.6}, nan={}, inf={}",
+                lm_sum, lm_mean, lm_min, lm_max, lm_nan_count, lm_inf_count
+            );
+        }
+
         let logits =
             self.matmul(&hidden_states, &self.lm_head, seq_len, hidden_size, vocab_size)?;
+
+        // DEBUG: Check logits after matmul
+        if std::env::var("DEBUG_LOGITS").is_ok() {
+            eprintln!("🔍 LOGITS AFTER MATMUL:");
+            eprintln!("  logits.len() = {}", logits.len());
+            eprintln!(
+                "  expected len = seq_len * vocab_size = {} * {} = {}",
+                seq_len,
+                vocab_size,
+                seq_len * vocab_size
+            );
+
+            // Check first few logits
+            let preview_len = 10.min(logits.len());
+            eprintln!("  logits preview: {:?}", &logits[..preview_len]);
+
+            // Check statistics
+            let logits_sum: f32 = logits.iter().sum();
+            let logits_mean = logits_sum / logits.len() as f32;
+            let logits_max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let logits_min = logits.iter().copied().fold(f32::INFINITY, f32::min);
+            let logits_nan_count = logits.iter().filter(|&&x| x.is_nan()).count();
+            let logits_inf_count = logits.iter().filter(|&&x| x.is_infinite()).count();
+
+            eprintln!(
+                "  logits stats: sum={:.6}, mean={:.6}, min={:.6}, max={:.6}, nan={}, inf={}",
+                logits_sum, logits_mean, logits_min, logits_max, logits_nan_count, logits_inf_count
+            );
+
+            // Check if the extreme dominance is in the raw logits
+            let mut sorted_logits: Vec<(usize, f32)> =
+                logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
+            sorted_logits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+            eprintln!("  Top 5 raw logits:");
+            for (i, (token_id, logit)) in sorted_logits.iter().take(5).enumerate() {
+                eprintln!("    {}: token {} = {:.6}", i + 1, token_id, logit);
+            }
+
+            // Check the difference between top 2
+            if sorted_logits.len() >= 2 {
+                let diff = sorted_logits[0].1 - sorted_logits[1].1;
+                eprintln!("  Top 2 difference: {:.6}", diff);
+                if diff > 1.0 {
+                    eprintln!("  ⚠️  Large difference between top 2 logits: {:.6}", diff);
+                }
+            }
+
+            // MANUAL VERIFICATION: Compute a few logits manually to check matmul
+            eprintln!("🔍 MANUAL MATMUL VERIFICATION:");
+            let top_token_id = sorted_logits[0].0;
+            let manual_logit =
+                compute_manual_logit(&hidden_states, &self.lm_head, top_token_id, hidden_size);
+            let matmul_logit = logits[top_token_id];
+            eprintln!(
+                "  Token {}: matmul={:.6}, manual={:.6}, diff={:.6}",
+                top_token_id,
+                matmul_logit,
+                manual_logit,
+                (matmul_logit - manual_logit).abs()
+            );
+
+            if (matmul_logit - manual_logit).abs() > 1e-5 {
+                eprintln!(
+                    "  ❌ MATMUL BUG DETECTED! Manual computation differs from matmul result"
+                );
+            } else {
+                eprintln!("  ✅ Matmul computation verified");
+            }
+        }
 
         // Debug: print detailed intermediate values
         if std::env::var("DEBUG_INTERMEDIATE").is_ok() {
@@ -1277,6 +1645,12 @@ impl Model {
             for (idx, _) in indexed_probs.iter().skip(top_k as usize) {
                 probs[*idx] = 0.0;
             }
+
+            // Debug: show top-k filtering
+            eprintln!("🔍 Top-k filtering (k={}):", top_k);
+            for (i, (idx, prob)) in indexed_probs.iter().take(top_k as usize).enumerate() {
+                eprintln!("    {}: token {} = {:.6}", i, idx, prob);
+            }
         }
 
         // Apply top-p (nucleus) filtering
@@ -1335,6 +1709,12 @@ impl Model {
         let sampled_idx = dist.sample(&mut rng);
         let token_id = indices[sampled_idx] as u32;
 
+        // Debug: show final sampling
+        eprintln!("🎲 Final sampling:");
+        eprintln!("    Non-zero probs: {}", non_zero_probs.len());
+        eprintln!("    Sampled idx: {} -> token {}", sampled_idx, token_id);
+        eprintln!("    Token prob: {:.6}", probs[token_id as usize]);
+
         Ok(token_id)
     }
 
@@ -1364,7 +1744,11 @@ impl Model {
         self.clear_kv_cache();
 
         // Encode prompt
-        let mut tokens = tokenizer.encode(prompt, true)?;
+        let mut tokens = tokenizer.encode(prompt, false)?;
+
+        // DEBUG: Dump tokenization details
+        eprintln!("PROMPT_STR = {:?}", prompt);
+        eprintln!("TOKENS_ENCODED (len={}): {:?}", tokens.len(), tokens);
 
         if tokens.is_empty() {
             return Err(Error::ParseError("Empty token sequence".to_string()));
@@ -1372,7 +1756,7 @@ impl Model {
 
         let num_prompt_tokens = tokens.len();
         let mut pos = 0;
-        let mut token = tokens[0];
+        // Don't initialize token here - we'll get it from tokens[pos] in the loop
 
         if std::env::var("DEBUG").is_ok() {
             eprintln!("DEBUG: Starting generation with {} prompt tokens", num_prompt_tokens);
@@ -1381,6 +1765,21 @@ impl Model {
         // Main generation loop - handles both prompt processing and token generation
         // This follows the llama2.c pattern exactly
         while pos < num_prompt_tokens + max_tokens - 1 {
+            // Get the current token to process
+            let token = if pos < num_prompt_tokens {
+                tokens[pos] // Process prompt token
+            } else {
+                tokens[tokens.len() - 1] // Process last generated token
+            };
+
+            // DEBUG: Dump token processing details
+            eprintln!("TOKENS (len={}): {:?}", tokens.len(), tokens);
+            if pos < num_prompt_tokens {
+                eprintln!("  processing prompt token at pos {} -> id {}", pos, token);
+            } else {
+                eprintln!("  processing generated token at pos {} -> id {}", pos, token);
+            }
+
             // Forward pass: process current token at current position
             // This adds the token to KV cache at position 'pos'
             if std::env::var("DEBUG").is_ok() {
@@ -1403,10 +1802,9 @@ impl Model {
             let mut last_logits = logits[(logits.len() - self.config.vocab_size)..].to_vec();
 
             // Determine next token
-            let next;
             if pos < num_prompt_tokens - 1 {
-                // Still processing prompt - force next prompt token
-                next = tokens[pos + 1];
+                // Still processing prompt - skip sampling (already have next token in sequence)
+                // Just continue to next position
             } else {
                 // Past prompt - sample next token from logits
                 // Apply repetition penalty to discourage repeated tokens
@@ -1423,11 +1821,19 @@ impl Model {
                     }
                 }
 
-                next = self.sample(&last_logits, temperature, top_p, top_k)?;
-
-                if std::env::var("DEBUG_LOGITS").is_ok() {
-                    eprintln!("  Sampled token: {}", next);
+                // ALWAYS show top logits for debugging coherence
+                let mut indexed: Vec<(usize, f32)> =
+                    last_logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
+                indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                eprintln!("🎯 Top 5 logits for sampling:");
+                for (i, (idx, val)) in indexed.iter().take(5).enumerate() {
+                    eprintln!("    {}: token {} = {:.6}", i, idx, val);
                 }
+
+                let next = self.sample(&last_logits, temperature, top_p, top_k)?;
+
+                // ALWAYS show sampled token for debugging
+                eprintln!("🎲 Sampled token: {} (logit: {:.6})", next, last_logits[next as usize]);
 
                 // Check for EOS token
                 if next == tokenizer.special_tokens().eos_token_id {
@@ -1438,10 +1844,8 @@ impl Model {
                 tokens.push(next);
             }
 
-            // Advance position FIRST, then update token for next iteration
-            // This is the key pattern from llama2.c
+            // Advance position for next iteration
             pos += 1;
-            token = next;
         }
 
         // Decode all tokens to text (skip special tokens)
@@ -1483,7 +1887,7 @@ impl Model {
         self.clear_kv_cache();
 
         // Encode prompt
-        let mut tokens = tokenizer.encode(prompt, true)?;
+        let mut tokens = tokenizer.encode(prompt, false)?;
 
         if tokens.is_empty() {
             return Err(Error::ParseError("Empty token sequence".to_string()));
@@ -1540,7 +1944,7 @@ impl Model {
         }
     }
 
-    fn rms_norm(&self, input: &[f32], weight: &[f32]) -> Result<Vec<f32>> {
+    pub fn rms_norm(&self, input: &[f32], weight: &[f32]) -> Result<Vec<f32>> {
         let hidden_size = weight.len();
         let seq_len = input.len() / hidden_size;
         let mut output = vec![0.0; input.len()];
@@ -1549,9 +1953,10 @@ impl Model {
             let offset = seq * hidden_size;
             let slice = &input[offset..offset + hidden_size];
 
-            // Compute RMS
+            // Compute RMS - FIXED: epsilon goes INSIDE sqrt like llama.cpp
             let sum_sq: f32 = slice.iter().map(|&x| x * x).sum();
-            let rms = (sum_sq / hidden_size as f32).sqrt() + self.config.rms_norm_eps;
+            let mean = sum_sq / hidden_size as f32;
+            let rms = (mean + self.config.rms_norm_eps).sqrt();
 
             // Normalize and scale
             for i in 0..hidden_size {
