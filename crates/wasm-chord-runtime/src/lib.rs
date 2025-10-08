@@ -17,7 +17,10 @@ pub use chat::{ChatMessage, ChatRole, ChatTemplate};
 pub use context::RuntimeContext;
 pub use inference::{GenOptions, GenerationState, InferenceSession};
 pub use sampling::{LogitsProcessor, Sampling};
-pub use transformer::{GenerationConfig, KVCache, Model, MultiHeadAttention, TransformerConfig};
+pub use transformer::{
+    AttentionWeights, FFNWeights, FeedForward, GenerationConfig, KVCache, Model,
+    MultiHeadAttention, TransformerConfig, TransformerLayer,
+};
 
 use wasm_chord_core::error::Error;
 
