@@ -47,6 +47,9 @@ members = [
     "examples/quality-test",
     "examples/gpu-test",
     "examples/gpu-cpu-comparison",
+    "examples/cache-test",
+    "examples/memory64-test",
+    "examples/wasm-memory64-test",
 ]
 
 [workspace.package]

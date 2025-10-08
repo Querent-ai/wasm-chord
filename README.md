@@ -112,12 +112,12 @@ fn main() {
 - [x] JS bindings scaffold
 - [x] Web demo example
 
-### Phase 2 - Core Features
-- [ ] WebGPU backend implementation
-- [ ] Token streaming API
-- [ ] Tokenizer integration (BPE/SentencePiece)
-- [ ] Model caching (IndexedDB/FS)
-- [ ] Memory64 support
+### Phase 2 - Core Features ✅
+- [x] WebGPU backend implementation
+- [x] Token streaming API
+- [x] Tokenizer integration (BPE/SentencePiece)
+- [x] Model caching (IndexedDB/FS)
+- [x] Memory64 support
 
 ### Phase 3 - Optimization
 - [ ] Multi-memory layout

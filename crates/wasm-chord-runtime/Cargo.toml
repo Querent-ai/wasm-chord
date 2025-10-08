@@ -43,6 +43,7 @@ criterion = { workspace = true }
 [features]
 default = []
 gpu = ["wasm-chord-gpu", "pollster"]
+memory64 = []
 
 [[bench]]
 name = "attention"

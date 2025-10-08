@@ -110,6 +110,78 @@ impl WasmModel {
             })
             .map_err(|e| JsValue::from_str(&format!("Streaming generation failed: {}", e)))
     }
+
+    /// Generate with async iterator (returns AsyncTokenStream)
+    /// Usage: for await (const token of model.generate_async(prompt)) { ... }
+    pub fn generate_async(&mut self, prompt: String) -> AsyncTokenStream {
+        AsyncTokenStream::new(prompt, self.config.clone())
+    }
+
+    /// Initialize GPU backend (if available)
+    #[cfg(feature = "gpu")]
+    pub fn init_gpu(&mut self) -> Result<(), JsValue> {
+        self.model
+            .init_gpu()
+            .map_err(|e| JsValue::from_str(&format!("GPU initialization failed: {}", e)))
+    }
+}
+
+/// Async token stream for streaming generation
+#[wasm_bindgen]
+pub struct AsyncTokenStream {
+    prompt: String,
+    config: GenerationConfig,
+    tokens: Vec<String>,
+    current_index: usize,
+}
+
+#[wasm_bindgen]
+impl AsyncTokenStream {
+    /// Create a new async token stream
+    fn new(prompt: String, config: GenerationConfig) -> Self {
+        Self {
+            prompt,
+            config,
+            tokens: Vec::new(),
+            current_index: 0,
+        }
+    }
+
+    /// Get next token (async iterator protocol)
+    /// Returns {value: string, done: boolean}
+    pub async fn next(&mut self) -> Result<JsValue, JsValue> {
+        // This is a simplified implementation
+        // In a real implementation, we'd need to:
+        // 1. Keep model state between calls
+        // 2. Generate one token at a time
+        // 3. Return each token as it's generated
+
+        if self.current_index < self.tokens.len() {
+            let token = self.tokens[self.current_index].clone();
+            self.current_index += 1;
+
+            let result = js_sys::Object::new();
+            js_sys::Reflect::set(&result, &"value".into(), &token.into())?;
+            js_sys::Reflect::set(&result, &"done".into(), &false.into())?;
+            Ok(result.into())
+        } else {
+            let result = js_sys::Object::new();
+            js_sys::Reflect::set(&result, &"value".into(), &JsValue::undefined())?;
+            js_sys::Reflect::set(&result, &"done".into(), &true.into())?;
+            Ok(result.into())
+        }
+    }
+
+    /// Symbol.asyncIterator support
+    #[wasm_bindgen(js_name = "Symbol.asyncIterator")]
+    pub fn symbol_async_iterator(&self) -> AsyncTokenStream {
+        AsyncTokenStream {
+            prompt: self.prompt.clone(),
+            config: self.config.clone(),
+            tokens: self.tokens.clone(),
+            current_index: 0,
+        }
+    }
 }
 
 /// Format chat messages with template

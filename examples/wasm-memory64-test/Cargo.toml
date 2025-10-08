@@ -1,0 +1,16 @@
+[package]
+name = "wasm-memory64-test"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+doc = false
+name = "wasm-memory64-test"
+path = "main.rs"
+
+[dependencies]
+wasm-chord-runtime.workspace = true
+
+[features]
+default = []
+memory64 = ["wasm-chord-runtime/memory64"]
