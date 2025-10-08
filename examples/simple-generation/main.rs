@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ Weights loaded\n");
 
     // === Generate Text ===
-    let prompt = "The quick brown fox";
+    let prompt = "Hello";
 
     let config = GenerationConfig {
         max_tokens: 5,    // Generate 5 tokens

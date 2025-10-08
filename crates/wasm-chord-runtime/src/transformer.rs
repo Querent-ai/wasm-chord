@@ -121,6 +121,16 @@ impl KVCache {
         let start_idx = self.current_seq_len * self.num_kv_heads * self.head_dim;
         let end_idx = start_idx + keys.len();
 
+        // C — Debug KV append
+        if std::env::var("DEBUG_KV_DETAILED").is_ok() {
+            eprintln!(
+                "KV_APPEND: seq_len_to_append={}, start_idx={}, end_idx={}, current_seq_len={}",
+                seq_len, start_idx, end_idx, self.current_seq_len
+            );
+            eprintln!("First few new K entries: {:?}", &keys[..keys.len().min(16)]);
+            eprintln!("First few new V entries: {:?}", &values[..values.len().min(16)]);
+        }
+
         self.keys[start_idx..end_idx].copy_from_slice(keys);
         self.values[start_idx..end_idx].copy_from_slice(values);
 
@@ -254,12 +264,37 @@ impl MultiHeadAttention {
             eprintln!("LAYER0 V preview: {:?}", &v[..v.len().min(16)]);
         }
 
+        // A — Dump Q/K/V before and after RoPE (layer 0 only)
+        if std::env::var("DUMP_QKV").is_ok() {
+            eprintln!("=== LAYER0 QKV RAW (first 64 floats) ===");
+            eprintln!("Q raw preview: {:?}", &q[..q.len().min(64)]);
+            eprintln!("K raw preview: {:?}", &k[..k.len().min(64)]);
+            eprintln!("V raw preview: {:?}", &v[..v.len().min(64)]);
+        }
+
         // Apply RoPE (Rotary Position Embedding)
         // Apply different positions for each token in the sequence
         let mut q = q;
         let mut k = k;
         self.apply_rope(&mut q, position, seq_len, self.config.num_heads)?;
         self.apply_rope(&mut k, position, seq_len, self.config.num_kv_heads)?;
+
+        // A — Dump Q/K after RoPE
+        if std::env::var("DUMP_QKV").is_ok() {
+            eprintln!("=== LAYER0 QKV AFTER ROPE (first 64 floats) ===");
+            eprintln!("Q after-rope preview: {:?}", &q[..q.len().min(64)]);
+            eprintln!("K after-rope preview: {:?}", &k[..k.len().min(64)]);
+        }
+
+        // D — Check GQA head mapping & head_dim
+        if std::env::var("DEBUG_CFG").is_ok() {
+            eprintln!("CFG: hidden_size={}, num_heads={}, num_kv_heads={}, head_dim={}, num_queries_per_kv={}",
+                      self.config.hidden_size,
+                      self.config.num_heads,
+                      self.config.num_kv_heads,
+                      self.head_dim,
+                      self.config.num_heads / self.config.num_kv_heads);
+        }
 
         // MINIMAL KV CACHE: Use a very simple approach that's guaranteed to work
         let output = if std::env::var("DISABLE_KV").is_ok() {
@@ -279,6 +314,18 @@ impl MultiHeadAttention {
 
             // Append new K/V to cache and get all cached K/V for attention
             let (cached_k, cached_v) = kv_cache.append(&k, &v)?;
+
+            // C — Verify KV cache layout & append indexing
+            if std::env::var("DEBUG_KV_DETAILED").is_ok() {
+                eprintln!(
+                    "KV_CACHE: current_seq_len={}, cached_k.len()={}, cached_v.len()={}",
+                    kv_cache.current_seq_len,
+                    cached_k.len(),
+                    cached_v.len()
+                );
+                eprintln!("cached_k preview (first 32): {:?}", &cached_k[..cached_k.len().min(32)]);
+                eprintln!("cached_v preview (first 32): {:?}", &cached_v[..cached_v.len().min(32)]);
+            }
 
             if std::env::var("DEBUG_KV").is_ok() {
                 eprintln!(
@@ -482,6 +529,15 @@ impl MultiHeadAttention {
                     eprintln!("  Computing scores for kv_seq_len={}", kv_seq_len);
                 }
 
+                // B — Dump attention scores and mask behavior (layer 0, head 0)
+                if std::env::var("DUMP_ATTN").is_ok() && h == 0 && i == 0 {
+                    eprintln!(
+                        "--- ATTENTION DEBUG head=0, query_pos={} kv_seq_len={} ---",
+                        position + i,
+                        kv_seq_len
+                    );
+                }
+
                 #[allow(clippy::needless_range_loop)]
                 for j in 0..kv_seq_len {
                     if std::env::var("DEBUG_KV").is_ok() && h == 0 && i == 0 {
@@ -497,9 +553,17 @@ impl MultiHeadAttention {
                     for idx in 0..head_dim {
                         score += q_vec[idx] * k_vec[idx];
                     }
+
+                    let score_before_scale = score;
                     // score /= sqrtf(head_size); - EXACTLY like llama2.c line 298
                     score /= (head_dim as f32).sqrt();
                     scores[j] = score;
+
+                    // B — Detailed attention score logging
+                    if std::env::var("DUMP_ATTN").is_ok() && h == 0 && i == 0 && j < 16 {
+                        eprintln!("j={} k_offset={} score(before scale)={:.6} score(scaled)={:.6} will_mask={}",
+                            j, k_offset, score_before_scale, score, j > (position + i));
+                    }
 
                     // Debug Q and K vectors for first head, first query
                     if std::env::var("DEBUG_ATTENTION").is_ok() && h == 0 && i == 0 && j == 0 {
@@ -541,6 +605,30 @@ impl MultiHeadAttention {
                         exp_scores[j] = (scores[j] - max_score).exp();
                         sum_exp += exp_scores[j];
                     }
+                }
+
+                // B — Dump post-softmax scores
+                if std::env::var("DUMP_ATTN").is_ok() && h == 0 && i == 0 {
+                    eprintln!(
+                        "exp_scores preview (first 16): {:?}",
+                        &exp_scores[..exp_scores.len().min(16)]
+                    );
+                    eprintln!("sum_exp = {:.6}, max_score = {:.6}", sum_exp, max_score);
+                }
+
+                // E — Manual mini-check of Q·K for one head
+                if std::env::var("DUMP_ATTN_MANUAL").is_ok() && h == 0 && i == 0 {
+                    let k_offset_j0 = kv_h * head_dim;
+                    let k_vec_j0 = &k[k_offset_j0..k_offset_j0 + head_dim];
+                    let mut manual = 0.0f32;
+                    for d in 0..head_dim {
+                        manual += q_vec[d] * k_vec_j0[d];
+                    }
+                    eprintln!(
+                        "MANUAL DOT head=0 pos=0 j=0 manual={:.6} computed={:.6}",
+                        manual,
+                        scores[0] * (head_dim as f32).sqrt()
+                    );
                 }
 
                 // Debug attention scores
@@ -877,6 +965,7 @@ pub struct Model {
 /// Transpose a matrix stored in row-major order
 /// Input: [rows, cols] in row-major order
 /// Output: [cols, rows] in row-major order
+#[allow(dead_code)]
 fn transpose_matrix(matrix: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     let mut transposed = vec![0.0; rows * cols];
     for i in 0..rows {
@@ -997,15 +1086,14 @@ fn compute_manual_logit(
     token_id: usize,
     hidden_size: usize,
 ) -> f32 {
-    // The matmul treats hidden_states as [seq_len, hidden_size] where seq_len=1
-    // and lm_head as [hidden_size, vocab_size]
-    // So for the first (and only) sequence position, we compute:
-    // logit = sum(hidden_states[i] * lm_head[i * vocab_size + token_id]) for i in 0..hidden_size
+    // CORRECTED: GGUF stores lm_head as [vocab_size, hidden_size] in row-major order
+    // So for token_id (row) and hidden dimension i (column):
+    // weight_idx = token_id * hidden_size + i
+    // logit = sum(hidden_states[i] * lm_head[token_id * hidden_size + i]) for i in 0..hidden_size
 
-    let vocab_size = 32000;
     let mut sum = 0.0f32;
     for (i, hidden_state) in hidden_states.iter().enumerate().take(hidden_size) {
-        let weight_idx = i * vocab_size + token_id;
+        let weight_idx = token_id * hidden_size + i;
         if weight_idx < lm_head.len() {
             sum += hidden_state * lm_head[weight_idx];
         }
@@ -1117,12 +1205,12 @@ impl Model {
             );
 
             println!(
-                "🔍 Loading token embeddings as-is: [hidden_size={}, vocab_size={}]",
-                self.config.hidden_size, self.config.vocab_size
+                "🔍 Loading token embeddings as-is: [vocab_size={}, hidden_size={}]",
+                self.config.vocab_size, self.config.hidden_size
             );
-            // GGUF stores token_embd.weight as [hidden_size, vocab_size]
-            // Our embedding lookup (line 1339-1340) correctly handles this format
-            // by gathering column token_id from each row
+            // GGUF stores token_embd.weight as [vocab_size, hidden_size] in row-major order
+            // Each row is the embedding vector for one token
+            // Load as-is - our embedding lookup uses token_id * hidden_size + dim_idx
             self.token_embeddings.copy_from_slice(embedding_data);
             eprintln!(
                 "  Embeddings preview (first 20): {:?}",
@@ -1143,38 +1231,36 @@ impl Model {
             tensor_stats("output.weight (raw)", lm_head_data);
 
             println!("🔍 Loading LM head tensor: {} elements", lm_head_data.len());
-            // GGUF stores output.weight as [hidden_size, vocab_size] already
-            // No transpose needed!
+            // GGUF stores output.weight as [vocab_size, hidden_size] in row-major order
+            // Load as-is - NO TRANSPOSE! Our compute_logit_for_token uses token_id * hidden_size + i
             self.lm_head.copy_from_slice(lm_head_data);
-            tensor_stats("output.weight (model)", &self.lm_head);
+            tensor_stats("output.weight (loaded)", &self.lm_head);
             println!(
-                "✅ LM head loaded (shape: [hidden_size={}, vocab_size={}])",
-                self.config.hidden_size, self.config.vocab_size
+                "✅ LM head loaded (shape: [vocab_size={}, hidden_size={}])",
+                self.config.vocab_size, self.config.hidden_size
             );
         } else if let Ok(lm_head_data) = tensor_loader.load_tensor("lm_head.weight", parser) {
             println!("✅ Found 'lm_head.weight'");
             eprintln!("LOADED 'lm_head.weight' raw.len={}", lm_head_data.len());
             tensor_stats("lm_head.weight (raw)", lm_head_data);
+            // GGUF stores lm_head.weight as [vocab_size, hidden_size] - load as-is, NO TRANSPOSE
             self.lm_head.copy_from_slice(lm_head_data);
-            tensor_stats("lm_head.weight (model)", &self.lm_head);
+            tensor_stats("lm_head.weight (loaded)", &self.lm_head);
             println!("✅ LM head loaded");
         } else if let Ok(lm_head_data) = tensor_loader.load_tensor("model.lm_head.weight", parser) {
             println!("✅ Found 'model.lm_head.weight'");
             eprintln!("LOADED 'model.lm_head.weight' raw.len={}", lm_head_data.len());
             tensor_stats("model.lm_head.weight (raw)", lm_head_data);
+            // GGUF stores model.lm_head.weight as [vocab_size, hidden_size] - load as-is, NO TRANSPOSE
             self.lm_head.copy_from_slice(lm_head_data);
-            tensor_stats("model.lm_head.weight (model)", &self.lm_head);
+            tensor_stats("model.lm_head.weight (loaded)", &self.lm_head);
             println!("✅ LM head loaded");
         } else {
             // Weight tying: LM head shares weights with token embeddings
             println!("🔍 Using weight tying - LM head from token embeddings");
-            let lm_head_transposed = transpose_matrix(
-                &self.token_embeddings,
-                self.config.hidden_size,
-                self.config.vocab_size,
-            );
-            self.lm_head.copy_from_slice(&lm_head_transposed);
-            tensor_stats("lm_head (from embeddings, transposed)", &self.lm_head);
+            // Both embeddings and LM head are [vocab_size, hidden_size] - just copy, NO TRANSPOSE!
+            self.lm_head.copy_from_slice(&self.token_embeddings);
+            tensor_stats("lm_head (from embeddings, copied)", &self.lm_head);
             println!("✅ LM head loaded from token embeddings (weight tying)");
         }
 
@@ -1346,23 +1432,35 @@ impl Model {
         }
 
         // 1. Embed tokens
-        // GGUF stores embeddings as [hidden_size, vocab_size]
-        // So for token_id, we need to gather column token_id from each row
+        // GGUF stores embeddings as [vocab_size, hidden_size] in row-major order
+        // Each row is the embedding vector for one token
         let mut hidden_states = vec![0.0; seq_len * hidden_size];
         let vocab_size = self.config.vocab_size;
 
         for (seq_idx, &token_id) in token_ids.iter().enumerate() {
             let out_start = seq_idx * hidden_size;
 
-            // Gather embedding for this token from the [hidden_size, vocab_size] matrix
-            // Element [row, col] is at index row * vocab_size + col
-            // So embedding dimension i for token_id is at: i * vocab_size + token_id
+            // Bounds check for token_id
+            if token_id as usize >= vocab_size {
+                eprintln!(
+                    "❌ CRITICAL: Token ID {} >= vocab_size {} - this will cause gibberish!",
+                    token_id, vocab_size
+                );
+                return Err(crate::Error::ParseError(format!(
+                    "Token ID {} out of bounds",
+                    token_id
+                )));
+            }
+
+            // CORRECTED: GGUF stores embeddings as [vocab_size, hidden_size] in row-major order
+            // To get token_id's embedding: row = token_id, column = hidden_idx
+            // index = row * hidden_size + column = token_id * hidden_size + hidden_idx
             for dim_idx in 0..hidden_size {
-                let emb_idx = dim_idx * vocab_size + (token_id as usize);
+                let emb_idx = (token_id as usize) * hidden_size + dim_idx;
                 if emb_idx < self.token_embeddings.len() {
                     hidden_states[out_start + dim_idx] = self.token_embeddings[emb_idx];
                 } else {
-                    eprintln!("WARN: Token {} dim {} out of bounds", token_id, dim_idx);
+                    eprintln!("WARN: Token {} embedding index {} out of bounds", token_id, emb_idx);
                     break;
                 }
             }
