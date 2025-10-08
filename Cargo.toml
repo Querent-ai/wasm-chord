@@ -46,6 +46,7 @@ members = [
     "examples/debug-performance",
     "examples/quality-test",
     "examples/gpu-test",
+    "examples/gpu-cpu-comparison",
 ]
 
 [workspace.package]

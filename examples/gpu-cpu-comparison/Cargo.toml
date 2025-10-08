@@ -1,0 +1,17 @@
+[package]
+name = "gpu-cpu-comparison"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+doc = false
+name = "gpu-cpu-comparison"
+path = "main.rs"
+
+[dependencies]
+wasm-chord-core.workspace = true
+wasm-chord-runtime.workspace = true
+
+[features]
+default = []
+gpu = ["wasm-chord-runtime/gpu"]
