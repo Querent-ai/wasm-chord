@@ -1,0 +1,12 @@
+[package]
+name = "ollama-comparison"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "main"
+path = "main.rs"
+
+[dependencies]
+wasm-chord-core = { path = "../../crates/wasm-chord-core" }
+wasm-chord-runtime = { path = "../../crates/wasm-chord-runtime" }

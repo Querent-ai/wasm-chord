@@ -1,0 +1,13 @@
+[package]
+name = "kernel-verification"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "main"
+path = "main.rs"
+
+[dependencies]
+wasm-chord-cpu = { path = "../../crates/wasm-chord-cpu" }
+wasm-chord-runtime = { path = "../../crates/wasm-chord-runtime" }
+
