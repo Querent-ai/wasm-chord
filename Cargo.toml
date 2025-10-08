@@ -45,6 +45,7 @@ members = [
     "examples/logit-analysis",
     "examples/debug-performance",
     "examples/quality-test",
+    "examples/gpu-test",
 ]
 
 [workspace.package]
