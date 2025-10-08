@@ -235,13 +235,19 @@ impl Tokenizer {
             return Ok(Vec::new());
         }
 
+        // DEBUG: Show what we're encoding
+        eprintln!("🔍 BPE encoding: {:?}", text);
+
         // Start by converting text to individual Unicode characters
         let mut tokens: Vec<String> = text.chars().map(|c| c.to_string()).collect();
 
         // If we have no merges, try direct vocab lookup or use byte fallback
         if self.merges.is_empty() {
+            eprintln!("⚠️  No merges found, using fallback encoding");
             return self.fallback_encode(text);
         }
+
+        eprintln!("✅ Using BPE with {} merges", self.merges.len());
 
         // Build merge priority map (earlier merges have higher priority)
         let mut merge_ranks: HashMap<(String, String), usize> = HashMap::new();

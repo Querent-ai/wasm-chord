@@ -56,6 +56,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     model.load_from_gguf(&mut tensor_loader, &mut parser)?;
     println!("✅ Weights loaded\n");
 
+    // === Initialize GPU (if available) ===
+    #[cfg(feature = "gpu")]
+    {
+        println!("🎮 Initializing GPU...");
+        match model.init_gpu() {
+            Ok(()) => println!("✅ GPU initialized successfully!"),
+            Err(e) => println!("⚠️  GPU unavailable, using CPU: {}", e),
+        }
+    }
+
     // === Test with Chat Template ===
     println!("\n📋 Testing with chat template...");
     let template = ChatTemplate::ChatML;

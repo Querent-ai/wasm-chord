@@ -44,6 +44,7 @@ members = [
     "examples/find-token-id",
     "examples/logit-analysis",
     "examples/debug-performance",
+    "examples/quality-test",
 ]
 
 [workspace.package]

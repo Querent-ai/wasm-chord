@@ -2,17 +2,17 @@
 //!
 //! Implements the core transformer components for LLM inference.
 
-mod config;
-mod kv_cache;
 mod attention;
+mod config;
 mod ffn;
+mod kv_cache;
 mod layer;
 mod model;
 
-pub use config::{TransformerConfig, GenerationConfig};
+pub use attention::{AttentionWeights, MultiHeadAttention};
+pub use config::{GenerationConfig, TransformerConfig};
+pub use ffn::{FFNWeights, FeedForward};
 pub use kv_cache::KVCache;
-pub use attention::{MultiHeadAttention, AttentionWeights};
-pub use ffn::{FeedForward, FFNWeights};
 pub use layer::TransformerLayer;
 pub use model::Model;
 

@@ -121,8 +121,14 @@ fn test_attention_weights_creation() {
 
     // Check dimensions
     assert_eq!(weights.wq.len(), config.hidden_size * config.hidden_size);
-    assert_eq!(weights.wk.len(), config.hidden_size * config.num_kv_heads * (config.hidden_size / config.num_heads));
-    assert_eq!(weights.wv.len(), config.hidden_size * config.num_kv_heads * (config.hidden_size / config.num_heads));
+    assert_eq!(
+        weights.wk.len(),
+        config.hidden_size * config.num_kv_heads * (config.hidden_size / config.num_heads)
+    );
+    assert_eq!(
+        weights.wv.len(),
+        config.hidden_size * config.num_kv_heads * (config.hidden_size / config.num_heads)
+    );
     assert_eq!(weights.wo.len(), config.hidden_size * config.hidden_size);
 }
 
@@ -264,7 +270,12 @@ fn test_model_rms_norm() {
     let expected_sum_sq = input.len() as f32; // After normalization, sum of squares should be close to length
 
     // Allow some tolerance for floating point arithmetic
-    assert!((sum_sq - expected_sum_sq).abs() < 1.0, "RMS norm didn't properly normalize: sum_sq={}, expected={}", sum_sq, expected_sum_sq);
+    assert!(
+        (sum_sq - expected_sum_sq).abs() < 1.0,
+        "RMS norm didn't properly normalize: sum_sq={}, expected={}",
+        sum_sq,
+        expected_sum_sq
+    );
 }
 
 /// Test Model KV cache clearing

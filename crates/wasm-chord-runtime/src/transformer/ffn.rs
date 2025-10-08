@@ -21,6 +21,7 @@ impl FeedForward {
     }
 
     /// Helper: matrix multiplication with GPU/CPU fallback
+    #[allow(clippy::too_many_arguments)]
     fn matmul(
         &self,
         a: &[f32],

@@ -10,3 +10,7 @@ path = "main.rs"
 [dependencies]
 wasm-chord-core.workspace = true
 wasm-chord-runtime.workspace = true
+
+[features]
+default = []
+gpu = ["wasm-chord-runtime/gpu"]

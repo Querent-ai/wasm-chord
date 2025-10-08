@@ -6,7 +6,7 @@ use wasm_chord_core::error::Result;
 use wasm_chord_gpu::GpuBackend;
 
 use super::{
-    TransformerConfig, KVCache, MultiHeadAttention, AttentionWeights, FeedForward, FFNWeights,
+    AttentionWeights, FFNWeights, FeedForward, KVCache, MultiHeadAttention, TransformerConfig,
 };
 
 /// Single transformer layer

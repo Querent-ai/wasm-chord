@@ -6,7 +6,7 @@ use wasm_chord_cpu::{matmul_f32, matmul_transposed};
 #[cfg(feature = "gpu")]
 use wasm_chord_gpu::GpuBackend;
 
-use super::{TransformerConfig, KVCache};
+use super::{KVCache, TransformerConfig};
 
 /// Multi-head attention layer
 #[allow(dead_code)]
@@ -23,6 +23,7 @@ impl MultiHeadAttention {
     }
 
     /// Helper: matrix multiplication with GPU/CPU fallback
+    #[allow(clippy::too_many_arguments)]
     fn matmul(
         &self,
         a: &[f32],
@@ -355,16 +356,8 @@ impl MultiHeadAttention {
         }
 
         // Repeat K/V to match num_heads (for GQA/MQA)
-        let k_repeated = if n_rep > 1 {
-            self.repeat_kv(k, kv_seq_len, n_rep)
-        } else {
-            k.to_vec()
-        };
-        let v_repeated = if n_rep > 1 {
-            self.repeat_kv(v, kv_seq_len, n_rep)
-        } else {
-            v.to_vec()
-        };
+        let k_repeated = if n_rep > 1 { self.repeat_kv(k, kv_seq_len, n_rep) } else { k.to_vec() };
+        let v_repeated = if n_rep > 1 { self.repeat_kv(v, kv_seq_len, n_rep) } else { v.to_vec() };
 
         if std::env::var("DEBUG_ATTN").is_ok() && n_rep > 1 {
             eprintln!("  K/V repeated to shape: [{}x{}x{}]", kv_seq_len, num_heads, head_dim);
@@ -419,7 +412,10 @@ impl MultiHeadAttention {
 
                 // Debug attention weights
                 if std::env::var("DEBUG_ATTN_WEIGHTS").is_ok() && h == 0 && i == 0 {
-                    eprintln!("  Attention weights (head 0, query 0): {:?}", &scores[..kv_seq_len.min(5)]);
+                    eprintln!(
+                        "  Attention weights (head 0, query 0): {:?}",
+                        &scores[..kv_seq_len.min(5)]
+                    );
                 }
 
                 // Weighted sum: output = scores @ V

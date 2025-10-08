@@ -100,7 +100,7 @@ pub fn dequantize_q4_k(block: &BlockQ4_K, output: &mut [f32]) -> Result<()> {
         // Dequantize 32 lower nibbles
         for _ in 0..32 {
             let q = block.qs[q_idx];
-            output[y_idx] = d1 * (q & 0xF) as f32 - m1_val;  // SUBTRACT min (matches llama.cpp)
+            output[y_idx] = d1 * (q & 0xF) as f32 - m1_val; // SUBTRACT min (matches llama.cpp)
             y_idx += 1;
             q_idx += 1;
         }
@@ -109,7 +109,7 @@ pub fn dequantize_q4_k(block: &BlockQ4_K, output: &mut [f32]) -> Result<()> {
         q_idx -= 32; // Go back to same bytes
         for _ in 0..32 {
             let q = block.qs[q_idx];
-            output[y_idx] = d2 * (q >> 4) as f32 - m2;  // SUBTRACT min (matches llama.cpp)
+            output[y_idx] = d2 * (q >> 4) as f32 - m2; // SUBTRACT min (matches llama.cpp)
             y_idx += 1;
             q_idx += 1;
         }
@@ -207,7 +207,7 @@ pub fn dequantize_q6_k(block: &BlockQ6_K, output: &mut [f32]) -> Result<()> {
 
     // Process first half (0-127): use scales[0..7]
     for l in 0..32 {
-        let is = l / 16;  // 0 or 1
+        let is = l / 16; // 0 or 1
 
         // Extract 4 values from the packed layout
         let q1 = ((block.ql[l] & 0x0F) | ((block.qh[l] & 3) << 4)) as i8 - 32;
@@ -224,8 +224,8 @@ pub fn dequantize_q6_k(block: &BlockQ6_K, output: &mut [f32]) -> Result<()> {
 
     // Process second half (128-255): use scales[8..15]
     for l in 0..32 {
-        let is = l / 16;  // 0 or 1
-        let sc_offset = 8;  // Offset into scales array for second half
+        let is = l / 16; // 0 or 1
+        let sc_offset = 8; // Offset into scales array for second half
 
         let q1 = ((block.ql[l + 64] & 0x0F) | ((block.qh[l + 32] & 3) << 4)) as i8 - 32;
         let q2 = ((block.ql[l + 96] & 0x0F) | (((block.qh[l + 32] >> 2) & 3) << 4)) as i8 - 32;

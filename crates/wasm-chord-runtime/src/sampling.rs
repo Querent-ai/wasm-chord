@@ -35,12 +35,7 @@ impl LogitsProcessor {
     /// Create a new logits processor with a specific sampling strategy
     pub fn from_sampling(seed: u64, sampling: Sampling) -> Self {
         let rng = rand::rngs::StdRng::seed_from_u64(seed);
-        Self {
-            rng,
-            sampling,
-            repetition_penalty: 1.0,
-            previous_tokens: Vec::new(),
-        }
+        Self { rng, sampling, repetition_penalty: 1.0, previous_tokens: Vec::new() }
     }
 
     /// Create a new logits processor with temperature and top-p
@@ -67,16 +62,9 @@ impl LogitsProcessor {
         let sampling = if temperature < 1e-7 {
             Sampling::ArgMax
         } else if top_k > 0 && top_p > 0.0 && top_p < 1.0 {
-            Sampling::TopKThenTopP {
-                k: top_k,
-                p: top_p,
-                temperature,
-            }
+            Sampling::TopKThenTopP { k: top_k, p: top_p, temperature }
         } else if top_k > 0 {
-            Sampling::TopK {
-                k: top_k,
-                temperature,
-            }
+            Sampling::TopK { k: top_k, temperature }
         } else if top_p > 0.0 && top_p < 1.0 {
             Sampling::TopP { p: top_p, temperature }
         } else {
@@ -84,12 +72,7 @@ impl LogitsProcessor {
         };
 
         let rng = rand::rngs::StdRng::seed_from_u64(seed);
-        Self {
-            rng,
-            sampling,
-            repetition_penalty,
-            previous_tokens: Vec::new(),
-        }
+        Self { rng, sampling, repetition_penalty, previous_tokens: Vec::new() }
     }
 
     /// Set repetition penalty
@@ -123,16 +106,10 @@ impl LogitsProcessor {
         let scaled: Vec<f32> = logits.iter().map(|&x| x / temperature as f32).collect();
 
         // Compute softmax
-        let max_logit = scaled
-            .iter()
-            .copied()
-            .fold(f32::NEG_INFINITY, f32::max);
+        let max_logit = scaled.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let exp_sum: f32 = scaled.iter().map(|&x| (x - max_logit).exp()).sum();
 
-        scaled
-            .iter()
-            .map(|&x| (x - max_logit).exp() / exp_sum)
-            .collect()
+        scaled.iter().map(|&x| (x - max_logit).exp() / exp_sum).collect()
     }
 
     /// Sample using argmax (greedy decoding)
@@ -194,9 +171,7 @@ impl LogitsProcessor {
         let mut indices: Vec<usize> = (0..probs.len()).collect();
 
         // Partially sort to find top-k
-        indices.select_nth_unstable_by(top_k, |&i, &j| {
-            probs[j].partial_cmp(&probs[i]).unwrap()
-        });
+        indices.select_nth_unstable_by(top_k, |&i, &j| probs[j].partial_cmp(&probs[i]).unwrap());
 
         // Zero out probabilities outside top-k
         for &i in &indices[top_k..] {
@@ -228,9 +203,7 @@ impl LogitsProcessor {
         let mut indices: Vec<usize> = (0..probs.len()).collect();
 
         // First apply top-k
-        indices.select_nth_unstable_by(top_k, |&i, &j| {
-            probs[j].partial_cmp(&probs[i]).unwrap()
-        });
+        indices.select_nth_unstable_by(top_k, |&i, &j| probs[j].partial_cmp(&probs[i]).unwrap());
 
         // Zero out probabilities outside top-k
         for &i in &indices[top_k..] {
@@ -313,12 +286,7 @@ mod tests {
 
     #[test]
     fn test_temperature_sampling() {
-        let mut processor = LogitsProcessor::from_sampling(
-            42,
-            Sampling::All {
-                temperature: 1.0,
-            },
-        );
+        let mut processor = LogitsProcessor::from_sampling(42, Sampling::All { temperature: 1.0 });
         let mut logits = vec![1.0, 2.0, 3.0];
         let token = processor.sample(&mut logits).unwrap();
         assert!(token < 3);
@@ -341,13 +309,8 @@ mod tests {
 
     #[test]
     fn test_topk_sampling() {
-        let mut processor = LogitsProcessor::from_sampling(
-            42,
-            Sampling::TopK {
-                k: 2,
-                temperature: 1.0,
-            },
-        );
+        let mut processor =
+            LogitsProcessor::from_sampling(42, Sampling::TopK { k: 2, temperature: 1.0 });
         let mut logits = vec![1.0, 5.0, 3.0, 2.0, 4.0];
         let token = processor.sample(&mut logits).unwrap();
         // Should only sample from indices 1 (5.0) or 4 (4.0)
@@ -356,13 +319,8 @@ mod tests {
 
     #[test]
     fn test_topp_sampling() {
-        let mut processor = LogitsProcessor::from_sampling(
-            42,
-            Sampling::TopP {
-                p: 0.9,
-                temperature: 1.0,
-            },
-        );
+        let mut processor =
+            LogitsProcessor::from_sampling(42, Sampling::TopP { p: 0.9, temperature: 1.0 });
         let mut logits = vec![1.0, 10.0, 2.0, 1.0, 1.0];
         let token = processor.sample(&mut logits).unwrap();
         assert!(token < 5);
