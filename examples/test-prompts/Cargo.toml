@@ -1,0 +1,8 @@
+[package]
+name = "test-prompts"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wasm-chord-core.workspace = true
+wasm-chord-runtime.workspace = true

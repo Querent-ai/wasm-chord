@@ -30,6 +30,7 @@ members = [
     "examples/test-rmsnorm",
     "examples/vocab-check",
     "examples/argmax-test",
+    "examples/test-prompts",
 ]
 
 [workspace.package]
