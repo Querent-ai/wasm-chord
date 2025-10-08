@@ -1740,6 +1740,15 @@ impl Model {
         let repetition_penalty = config.repetition_penalty;
         use wasm_chord_core::error::Error;
 
+        // Create logits processor with configured sampling strategy
+        let mut logits_processor = crate::sampling::LogitsProcessor::with_params(
+            42, // seed - could be made configurable
+            temperature as f64,
+            top_p as f64,
+            top_k as usize,
+            repetition_penalty,
+        );
+
         // Clear KV cache for new generation
         self.clear_kv_cache();
 
@@ -1807,9 +1816,6 @@ impl Model {
                 // Just continue to next position
             } else {
                 // Past prompt - sample next token from logits
-                // Apply repetition penalty to discourage repeated tokens
-                self.apply_repetition_penalty(&mut last_logits, &tokens, repetition_penalty);
-
                 // Debug: print top 5 logits before sampling
                 if std::env::var("DEBUG_LOGITS").is_ok() {
                     let mut indexed: Vec<(usize, f32)> =
@@ -1830,7 +1836,9 @@ impl Model {
                     eprintln!("    {}: token {} = {:.6}", i, idx, val);
                 }
 
-                let next = self.sample(&last_logits, temperature, top_p, top_k)?;
+                let next = logits_processor
+                    .sample(&mut last_logits)
+                    .map_err(|e| Error::ParseError(e))?;
 
                 // ALWAYS show sampled token for debugging
                 eprintln!("🎲 Sampled token: {} (logit: {:.6})", next, last_logits[next as usize]);
@@ -1883,6 +1891,15 @@ impl Model {
         let repetition_penalty = config.repetition_penalty;
         use wasm_chord_core::error::Error;
 
+        // Create logits processor with configured sampling strategy
+        let mut logits_processor = crate::sampling::LogitsProcessor::with_params(
+            42, // seed - could be made configurable
+            temperature as f64,
+            top_p as f64,
+            top_k as usize,
+            repetition_penalty,
+        );
+
         // Clear KV cache for new generation
         self.clear_kv_cache();
 
@@ -1909,8 +1926,9 @@ impl Model {
                 next = tokens[pos + 1];
             } else {
                 // Generate new token
-                self.apply_repetition_penalty(&mut last_logits, &tokens, repetition_penalty);
-                next = self.sample(&last_logits, temperature, top_p, top_k)?;
+                next = logits_processor
+                    .sample(&mut last_logits)
+                    .map_err(|e| Error::ParseError(e))?;
 
                 // Check for EOS
                 if next == tokenizer.special_tokens().eos_token_id {

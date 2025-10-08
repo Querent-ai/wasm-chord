@@ -10,6 +10,7 @@ pub struct GenOptions {
     pub temperature: f32,
     pub top_p: f32,
     pub top_k: u32,
+    pub repetition_penalty: f32,
     pub seed: u32,
     pub stop_token_count: u8,
     pub stop_tokens_ptr: u32,
@@ -22,6 +23,7 @@ impl Default for GenOptions {
             temperature: 0.7,
             top_p: 0.9,
             top_k: 40,
+            repetition_penalty: 1.1,
             seed: 0,
             stop_token_count: 0,
             stop_tokens_ptr: 0,
@@ -60,11 +62,21 @@ pub struct InferenceSession {
     stop_tokens: Vec<u32>,
     /// Complete generated sequence
     generated_tokens: Vec<u32>,
+    /// Logits processor for sampling
+    logits_processor: crate::sampling::LogitsProcessor,
 }
 
 impl InferenceSession {
     /// Create a new inference session
     pub fn new(model_id: u32, prompt_tokens: Vec<u32>, options: GenOptions) -> Self {
+        let logits_processor = crate::sampling::LogitsProcessor::with_params(
+            42, // seed - could be made configurable
+            options.temperature as f64,
+            options.top_p as f64,
+            options.top_k as usize,
+            options.repetition_penalty,
+        );
+
         Self {
             model_id,
             prompt_tokens,
@@ -74,6 +86,7 @@ impl InferenceSession {
             token_buffer: VecDeque::new(),
             stop_tokens: Vec::new(),
             generated_tokens: Vec::new(),
+            logits_processor,
         }
     }
 
@@ -173,15 +186,13 @@ impl InferenceSession {
 
         // Extract logits for last position
         let vocab_size = model.config.vocab_size;
-        let last_logits = &logits[logits.len() - vocab_size..];
+        let mut last_logits = logits[logits.len() - vocab_size..].to_vec();
 
         // Sample next token
-        let token_id = model.sample(
-            last_logits,
-            self.options.temperature,
-            self.options.top_p,
-            self.options.top_k,
-        )?;
+        let token_id = self
+            .logits_processor
+            .sample(&mut last_logits)
+            .map_err(|e| wasm_chord_core::error::Error::ParseError(e))?;
 
         // Check stop tokens
         if self.stop_tokens.contains(&token_id) {

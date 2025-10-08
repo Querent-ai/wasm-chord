@@ -60,8 +60,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let prompt = "Hello";
 
     let config = GenerationConfig {
-        max_tokens: 5,    // Generate 5 tokens
-        temperature: 0.0, // Deterministic output
+        max_tokens: 5,
+        temperature: 0.0, // Deterministic/greedy
         top_p: 0.9,
         top_k: 40,
         repetition_penalty: 1.1,

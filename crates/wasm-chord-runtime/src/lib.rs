@@ -6,6 +6,7 @@ mod abi;
 mod chat;
 mod context;
 mod inference;
+mod sampling;
 mod transformer;
 
 #[cfg(target_arch = "wasm32")]
@@ -15,6 +16,7 @@ pub use abi::*;
 pub use chat::{ChatMessage, ChatRole, ChatTemplate};
 pub use context::RuntimeContext;
 pub use inference::{GenOptions, GenerationState, InferenceSession};
+pub use sampling::{LogitsProcessor, Sampling};
 pub use transformer::{GenerationConfig, KVCache, Model, MultiHeadAttention, TransformerConfig};
 
 use wasm_chord_core::error::Error;

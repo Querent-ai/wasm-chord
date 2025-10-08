@@ -84,6 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             temperature: 0.7,
             top_p: 0.9,
             top_k: 40,
+            repetition_penalty: 1.1,
             seed: 0,
             stop_token_count: 0,
             stop_tokens_ptr: 0,
