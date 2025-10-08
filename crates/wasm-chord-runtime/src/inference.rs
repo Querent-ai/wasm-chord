@@ -192,7 +192,7 @@ impl InferenceSession {
         let token_id = self
             .logits_processor
             .sample(&mut last_logits)
-            .map_err(|e| wasm_chord_core::error::Error::ParseError(e))?;
+            .map_err(wasm_chord_core::error::Error::ParseError)?;
 
         // Check stop tokens
         if self.stop_tokens.contains(&token_id) {

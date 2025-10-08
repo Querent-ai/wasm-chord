@@ -9,14 +9,14 @@
 use std::fs::File;
 use std::io::BufReader;
 use wasm_chord_core::{GGUFParser, TensorLoader, Tokenizer};
-use wasm_chord_runtime::{GenerationConfig, Model, TransformerConfig};
+use wasm_chord_runtime::{ChatMessage, ChatTemplate, GenerationConfig, Model, TransformerConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🚀 WASM-Chord Simple Text Generation");
     println!("=====================================\n");
 
     // Model path - use Q4_K model to match llama.cpp test
-    let model_path = "models/tinyllama-1.1b.Q4_K_M.gguf"; // Base model, higher quality
+    let model_path = "/home/puneet/.ollama/models/tinyllama-1.1b.Q4_K_M.gguf"; // Base model, higher quality
     println!("📂 Loading model: {}", model_path);
 
     // === Load Model ===
@@ -56,38 +56,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     model.load_from_gguf(&mut tensor_loader, &mut parser)?;
     println!("✅ Weights loaded\n");
 
-    // === Generate Text ===
-    let prompt = "Hello";
+    // === Test with Chat Template ===
+    println!("\n📋 Testing with chat template...");
+    let template = ChatTemplate::ChatML;
+    let conversation = vec![
+        ChatMessage::system("You are a helpful AI assistant."),
+        ChatMessage::user("What is 2+2?"),
+    ];
+    let chat_prompt = template.format(&conversation)?;
 
     let config = GenerationConfig {
-        max_tokens: 5,
+        max_tokens: 10,
         temperature: 0.0, // Deterministic/greedy
         top_p: 0.9,
         top_k: 40,
         repetition_penalty: 1.1,
     };
 
-    // Enable debug mode to see what's happening
-    // std::env::set_var("DEBUG_FORWARD", "1");
-    // std::env::set_var("DEBUG_KV", "1");
-
-    // Debug: Check tokenization
-    let tokens = tokenizer.encode(prompt, false)?;
-    println!("🔍 Tokenization:");
-    println!("   Input: {:?}", prompt);
-    println!("   Tokens: {:?}", tokens);
-    println!("   Count: {}", tokens.len());
-
-    println!("\n🎲 Generating text...");
-    println!("   Prompt: {:?}", prompt);
-    println!("   Config: {:?}", config);
+    println!("🔍 Chat prompt:\n{}\n", chat_prompt);
 
     let start = std::time::Instant::now();
-    let generated = model.generate(&prompt, &tokenizer, &config)?;
+    let response = model.generate(&chat_prompt, &tokenizer, &config)?;
     let duration = start.elapsed();
 
+    // Extract just the assistant response
+    let assistant_response = if let Some(idx) = response.rfind("<|assistant|>") {
+        response[idx + 13..].trim()
+    } else {
+        response.trim()
+    };
+
     println!("\n✅ Generation complete in {:?}", duration);
-    println!("📝 Result:\n   {}\n", generated);
+    println!("📝 Assistant response:\n   {}\n", assistant_response);
 
     Ok(())
 }

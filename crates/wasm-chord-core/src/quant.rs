@@ -100,7 +100,7 @@ pub fn dequantize_q4_k(block: &BlockQ4_K, output: &mut [f32]) -> Result<()> {
         // Dequantize 32 lower nibbles
         for _ in 0..32 {
             let q = block.qs[q_idx];
-            output[y_idx] = d1 * (q & 0xF) as f32 - m1_val;
+            output[y_idx] = d1 * (q & 0xF) as f32 - m1_val;  // SUBTRACT min (matches llama.cpp)
             y_idx += 1;
             q_idx += 1;
         }
@@ -109,7 +109,7 @@ pub fn dequantize_q4_k(block: &BlockQ4_K, output: &mut [f32]) -> Result<()> {
         q_idx -= 32; // Go back to same bytes
         for _ in 0..32 {
             let q = block.qs[q_idx];
-            output[y_idx] = d2 * (q >> 4) as f32 - m2;
+            output[y_idx] = d2 * (q >> 4) as f32 - m2;  // SUBTRACT min (matches llama.cpp)
             y_idx += 1;
             q_idx += 1;
         }
@@ -205,9 +205,9 @@ pub fn dequantize_q6_k(block: &BlockQ6_K, output: &mut [f32]) -> Result<()> {
     //   q3 = (ql[l] >> 4) | ((qh[l] >> 4) & 3) << 4
     //   q4 = (ql[l+32] >> 4) | ((qh[l] >> 6) & 3) << 4
 
+    // Process first half (0-127): use scales[0..7]
     for l in 0..32 {
-        let is = l / 16;
-        let scale = block.scales[is] as f32;
+        let is = l / 16;  // 0 or 1
 
         // Extract 4 values from the packed layout
         let q1 = ((block.ql[l] & 0x0F) | ((block.qh[l] & 3) << 4)) as i8 - 32;
@@ -215,27 +215,28 @@ pub fn dequantize_q6_k(block: &BlockQ6_K, output: &mut [f32]) -> Result<()> {
         let q3 = ((block.ql[l] >> 4) | (((block.qh[l] >> 4) & 3) << 4)) as i8 - 32;
         let q4 = ((block.ql[l + 32] >> 4) | (((block.qh[l] >> 6) & 3) << 4)) as i8 - 32;
 
-        // Write outputs in the correct order
-        output[l] = d * scale * (q1 as f32);
-        output[l + 32] = d * scale * (q2 as f32);
-        output[l + 64] = d * scale * (q3 as f32);
-        output[l + 96] = d * scale * (q4 as f32);
+        // Write outputs with correct scales (matches llama.cpp: sc[is+0/2/4/6])
+        output[l] = d * (block.scales[is] as f32) * (q1 as f32);
+        output[l + 32] = d * (block.scales[is + 2] as f32) * (q2 as f32);
+        output[l + 64] = d * (block.scales[is + 4] as f32) * (q3 as f32);
+        output[l + 96] = d * (block.scales[is + 6] as f32) * (q4 as f32);
     }
 
-    // Process second half (128-255)
+    // Process second half (128-255): use scales[8..15]
     for l in 0..32 {
-        let is = 2 + l / 16;
-        let scale = block.scales[is] as f32;
+        let is = l / 16;  // 0 or 1
+        let sc_offset = 8;  // Offset into scales array for second half
 
         let q1 = ((block.ql[l + 64] & 0x0F) | ((block.qh[l + 32] & 3) << 4)) as i8 - 32;
         let q2 = ((block.ql[l + 96] & 0x0F) | (((block.qh[l + 32] >> 2) & 3) << 4)) as i8 - 32;
         let q3 = ((block.ql[l + 64] >> 4) | (((block.qh[l + 32] >> 4) & 3) << 4)) as i8 - 32;
         let q4 = ((block.ql[l + 96] >> 4) | (((block.qh[l + 32] >> 6) & 3) << 4)) as i8 - 32;
 
-        output[l + 128] = d * scale * (q1 as f32);
-        output[l + 160] = d * scale * (q2 as f32);
-        output[l + 192] = d * scale * (q3 as f32);
-        output[l + 224] = d * scale * (q4 as f32);
+        // Write outputs with correct scales (sc_offset=8, so we use scales[8..15])
+        output[l + 128] = d * (block.scales[sc_offset + is] as f32) * (q1 as f32);
+        output[l + 160] = d * (block.scales[sc_offset + is + 2] as f32) * (q2 as f32);
+        output[l + 192] = d * (block.scales[sc_offset + is + 4] as f32) * (q3 as f32);
+        output[l + 224] = d * (block.scales[sc_offset + is + 6] as f32) * (q4 as f32);
     }
 
     Ok(())

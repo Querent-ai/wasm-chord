@@ -32,6 +32,18 @@ members = [
     "examples/argmax-test",
     "examples/kv-cache-test",
     "examples/test-prompts",
+    "examples/kernel-verification",
+    "examples/ollama-comparison",
+    "examples/tokenization-check",
+    "examples/lm-head-debug",
+    "examples/q4k-fix-test",
+    "examples/ollama-comprehensive-test",
+    "examples/weight-verification",
+    "examples/layer-debug",
+    "examples/rmsnorm-debug",
+    "examples/find-token-id",
+    "examples/logit-analysis",
+    "examples/debug-performance",
 ]
 
 [workspace.package]

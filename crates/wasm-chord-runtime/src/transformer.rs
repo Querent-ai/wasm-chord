@@ -6,7 +6,7 @@ use rand::distributions::{Distribution, WeightedIndex};
 use rand::thread_rng;
 use wasm_chord_core::error::Result;
 use wasm_chord_core::Tokenizer;
-use wasm_chord_cpu::matmul_f32;
+use wasm_chord_cpu::{matmul_f32, matmul_transposed};
 
 #[cfg(feature = "gpu")]
 use wasm_chord_gpu::GpuBackend;
@@ -160,18 +160,25 @@ impl MultiHeadAttention {
         m: usize,
         k: usize,
         n: usize,
+        transposed_b: bool,
         #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
     ) -> Result<Vec<f32>> {
         #[cfg(feature = "gpu")]
         if let Some(gpu) = gpu {
-            if let Ok(result) = gpu.matmul(a, b, m as u32, k as u32, n as u32) {
-                return Ok(result);
+            if !transposed_b {
+                if let Ok(result) = gpu.matmul(a, b, m as u32, k as u32, n as u32) {
+                    return Ok(result);
+                }
             }
         }
 
         // CPU fallback
         let mut result = vec![0.0; m * n];
-        matmul_f32(a, b, &mut result, m, k, n)?;
+        if transposed_b {
+            matmul_transposed(a, b, &mut result, m, k, n)?;
+        } else {
+            matmul_f32(a, b, &mut result, m, k, n)?;
+        }
         Ok(result)
     }
 
@@ -205,6 +212,7 @@ impl MultiHeadAttention {
             seq_len,
             hidden_size,
             hidden_size,
+            true,
             #[cfg(feature = "gpu")]
             gpu,
         )?;
@@ -232,6 +240,7 @@ impl MultiHeadAttention {
             seq_len,
             hidden_size,
             self.config.num_kv_heads * self.head_dim,
+            true,
             #[cfg(feature = "gpu")]
             gpu,
         )?;
@@ -243,6 +252,7 @@ impl MultiHeadAttention {
             seq_len,
             hidden_size,
             self.config.num_kv_heads * self.head_dim,
+            true,
             #[cfg(feature = "gpu")]
             gpu,
         )?;
@@ -304,6 +314,7 @@ impl MultiHeadAttention {
             seq_len,
             hidden_size,
             hidden_size,
+            true,
             #[cfg(feature = "gpu")]
             gpu,
         )?;
@@ -407,7 +418,46 @@ impl MultiHeadAttention {
         sum
     }
 
-    /// Compute scaled dot-product attention (exposed for benchmarking)
+    /// Repeat K/V tensors for Grouped Query Attention (GQA)
+    ///
+    /// Expands K/V from num_kv_heads to num_heads by repeating each KV head n_rep times.
+    /// Input shape: [seq_len, num_kv_heads, head_dim]
+    /// Output shape: [seq_len, num_heads, head_dim]
+    fn repeat_kv(&self, kv: &[f32], seq_len: usize, n_rep: usize) -> Vec<f32> {
+        if n_rep == 1 {
+            return kv.to_vec();
+        }
+
+        let num_kv_heads = self.config.num_kv_heads;
+        let head_dim = self.head_dim;
+        let mut output = vec![0.0; seq_len * num_kv_heads * n_rep * head_dim];
+
+        for seq_idx in 0..seq_len {
+            for kv_h in 0..num_kv_heads {
+                // Read the KV head once
+                let kv_offset = (seq_idx * num_kv_heads + kv_h) * head_dim;
+                let kv_head = &kv[kv_offset..kv_offset + head_dim];
+
+                // Repeat it n_rep times
+                for rep in 0..n_rep {
+                    let out_h = kv_h * n_rep + rep;
+                    let out_offset = (seq_idx * num_kv_heads * n_rep + out_h) * head_dim;
+                    output[out_offset..out_offset + head_dim].copy_from_slice(kv_head);
+                }
+            }
+        }
+
+        output
+    }
+
+    /// Compute scaled dot-product attention (Candle-style with batched operations)
+    ///
+    /// Follows Candle's approach:
+    /// 1. Repeat K/V for GQA (if num_heads != num_kv_heads)
+    /// 2. Compute attention scores: Q @ K^T / sqrt(head_dim)
+    /// 3. Apply causal mask
+    /// 4. Softmax over scores
+    /// 5. Apply attention: scores @ V
     pub fn compute_attention(
         &self,
         q: &[f32],
@@ -419,167 +469,95 @@ impl MultiHeadAttention {
         let head_dim = self.head_dim;
         let num_heads = self.config.num_heads;
         let num_kv_heads = self.config.num_kv_heads;
-
-        // GQA: num_heads query heads, num_kv_heads key/value heads
-        // Each KV head is shared by (num_heads / num_kv_heads) query heads
-        let num_queries_per_kv = num_heads / num_kv_heads;
+        let n_rep = num_heads / num_kv_heads;
 
         // Q shape: [seq_len, num_heads, head_dim]
         // K, V shape: [kv_seq_len, num_kv_heads, head_dim]
         let kv_seq_len = k.len() / (num_kv_heads * head_dim);
 
-        // Optional assertion to catch KV off-by-one/layout issues during single-token steps
-        if std::env::var("ASSERT_KV").is_ok() && seq_len == 1 {
-            let expected = position + 1; // when using cache, kv positions should be 0..=position
-            if kv_seq_len != expected {
-                eprintln!(
-                    "ASSERT_KV failed: kv_seq_len={}, expected={}, position={}, num_kv_heads={}, head_dim={}, k.len()={}",
-                    kv_seq_len,
-                    expected,
-                    position,
-                    num_kv_heads,
-                    head_dim,
-                    k.len()
-                );
-                panic!("KV cache length mismatch");
-            }
-        }
-
         if std::env::var("DEBUG_ATTN").is_ok() {
             eprintln!(
-                "ATTN: seq_len={}, kv_seq_len={}, position={}",
-                seq_len, kv_seq_len, position
+                "ATTN: seq_len={}, kv_seq_len={}, position={}, n_rep={}",
+                seq_len, kv_seq_len, position, n_rep
             );
             eprintln!("  Q shape: [{}x{}x{}]", seq_len, num_heads, head_dim);
-            eprintln!("  K/V shape in cache: [{}x{}x{}]", kv_seq_len, num_kv_heads, head_dim);
+            eprintln!("  K/V shape: [{}x{}x{}]", kv_seq_len, num_kv_heads, head_dim);
         }
 
-        // Add debug logging to catch infinite loops
-        if std::env::var("DEBUG_KV").is_ok() {
-            eprintln!("  Starting attention computation...");
+        // Repeat K/V to match num_heads (for GQA/MQA)
+        let k_repeated = if n_rep > 1 {
+            self.repeat_kv(k, kv_seq_len, n_rep)
+        } else {
+            k.to_vec()
+        };
+        let v_repeated = if n_rep > 1 {
+            self.repeat_kv(v, kv_seq_len, n_rep)
+        } else {
+            v.to_vec()
+        };
+
+        if std::env::var("DEBUG_ATTN").is_ok() && n_rep > 1 {
+            eprintln!("  K/V repeated to shape: [{}x{}x{}]", kv_seq_len, num_heads, head_dim);
         }
 
+        // Compute attention for each head independently
         let mut output = vec![0.0; seq_len * num_heads * head_dim];
+        let scale = 1.0 / (head_dim as f32).sqrt();
 
-        // Process each query head
         for h in 0..num_heads {
-            // Determine which KV head to use (for GQA)
-            let kv_h = h / num_queries_per_kv;
-
-            if std::env::var("DEBUG_KV").is_ok() && h == 0 {
-                eprintln!("  Processing head 0, kv_h={}, num_heads={}", kv_h, num_heads);
-            }
-
             for i in 0..seq_len {
-                // Get query vector for this position and head
+                // Get query vector: Q[i, h, :]
                 let q_offset = (i * num_heads + h) * head_dim;
                 let q_vec = &q[q_offset..q_offset + head_dim];
 
-                // Compute attention scores for all KV positions
+                // Compute scores = Q[i,h] @ K[j,h]^T for all j
                 let mut scores = vec![0.0; kv_seq_len];
+                for (j, score_ref) in scores.iter_mut().enumerate().take(kv_seq_len) {
+                    let k_offset = (j * num_heads + h) * head_dim;
+                    let k_vec = &k_repeated[k_offset..k_offset + head_dim];
 
-                if std::env::var("DEBUG_KV").is_ok() && h == 0 && i == 0 {
-                    eprintln!("  Computing scores for kv_seq_len={}", kv_seq_len);
-                }
-
-                #[allow(clippy::needless_range_loop)]
-                for j in 0..kv_seq_len {
-                    if std::env::var("DEBUG_KV").is_ok() && h == 0 && i == 0 {
-                        eprintln!("    Processing j={}/{}", j, kv_seq_len);
+                    // Dot product: Q @ K^T
+                    let mut score = 0.0;
+                    for d in 0..head_dim {
+                        score += q_vec[d] * k_vec[d];
                     }
+                    *score_ref = score * scale;
 
-                    // Get key vector
-                    let k_offset = (j * num_kv_heads + kv_h) * head_dim;
-                    let k_vec = &k[k_offset..k_offset + head_dim];
-
-                    // Calculate the attention score as the dot product of q and k - EXACTLY like llama2.c
-                    let mut score = 0.0f32;
-                    for idx in 0..head_dim {
-                        score += q_vec[idx] * k_vec[idx];
-                    }
-                    // score /= sqrtf(head_size); - EXACTLY like llama2.c line 298
-                    score /= (head_dim as f32).sqrt();
-                    scores[j] = score;
-
-                    // Debug Q and K vectors for first head, first query
-                    if std::env::var("DEBUG_ATTENTION").is_ok() && h == 0 && i == 0 && j == 0 {
-                        eprintln!("  K vector (first 5): {:?}", &k_vec[..5.min(k_vec.len())]);
-                        eprintln!(
-                            "  Dot product: {:.6}, Scale: {:.6}",
-                            score * (head_dim as f32).sqrt(),
-                            1.0 / (head_dim as f32).sqrt()
-                        );
-                        eprintln!("  Q vector (first 5): {:?}", &q_vec[..5.min(q_vec.len())]);
-                    }
-
-                    // Causal masking: can only attend to positions up to and including current position
-                    // llama2.c does: for (t = 0; t <= pos; t++) { compute attention }
-                    // So position `position + i` can attend to all j <= position + i
+                    // Causal masking
                     let query_abs_pos = position + i;
                     if j > query_abs_pos {
                         scores[j] = f32::NEG_INFINITY;
                     }
-
-                    // Debug causal mask
-                    if std::env::var("DEBUG_CAUSAL").is_ok() && h == 0 && i == 0 {
-                        eprintln!(
-                            "  Causal mask: query_pos={}, kv_pos={}, masked={}",
-                            query_abs_pos,
-                            j,
-                            j > query_abs_pos
-                        );
-                    }
                 }
 
-                // Softmax over scores
+                // Softmax
                 let max_score = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                let mut exp_scores = vec![0.0; kv_seq_len];
-                let mut sum_exp = 0.0;
-
-                for j in 0..kv_seq_len {
-                    if scores[j].is_finite() {
-                        exp_scores[j] = (scores[j] - max_score).exp();
-                        sum_exp += exp_scores[j];
+                let mut exp_sum = 0.0;
+                for score in &mut scores {
+                    if score.is_finite() {
+                        *score = (*score - max_score).exp();
+                        exp_sum += *score;
+                    } else {
+                        *score = 0.0;
+                    }
+                }
+                if exp_sum > 0.0 {
+                    for score in &mut scores {
+                        *score /= exp_sum;
                     }
                 }
 
-                // Debug attention scores
-                if std::env::var("DEBUG_ATTENTION").is_ok() && h == 0 && i == 0 {
-                    eprintln!("  Q vector (first 5): {:?}", &q_vec[..5.min(q_vec.len())]);
-                    eprintln!(
-                        "  Attention scores (head 0, pos 0): {:?}",
-                        &scores[..5.min(scores.len())]
-                    );
-                    eprintln!("  Max score: {:.6}, Sum exp: {:.6}", max_score, sum_exp);
-                    eprintln!(
-                        "  Exp scores (first 5): {:?}",
-                        &exp_scores[..5.min(exp_scores.len())]
-                    );
-                }
-
-                // Normalize
-                if sum_exp > 0.0 {
-                    for score in &mut exp_scores {
-                        *score /= sum_exp;
-                    }
-                }
-
-                // Debug: show attention weights for first head, first query
+                // Debug attention weights
                 if std::env::var("DEBUG_ATTN_WEIGHTS").is_ok() && h == 0 && i == 0 {
-                    eprintln!(
-                        "  Attention weights (head 0, query 0): {:?}",
-                        &exp_scores[..kv_seq_len.min(5)]
-                    );
+                    eprintln!("  Attention weights (head 0, query 0): {:?}", &scores[..kv_seq_len.min(5)]);
                 }
 
-                // Weighted sum of values
+                // Weighted sum: output = scores @ V
                 let out_offset = (i * num_heads + h) * head_dim;
-
-                #[allow(clippy::needless_range_loop)]
                 for j in 0..kv_seq_len {
-                    let v_offset = (j * num_kv_heads + kv_h) * head_dim;
-                    let v_vec = &v[v_offset..v_offset + head_dim];
-                    let weight = exp_scores[j];
+                    let v_offset = (j * num_heads + h) * head_dim;
+                    let v_vec = &v_repeated[v_offset..v_offset + head_dim];
+                    let weight = scores[j];
 
                     for d in 0..head_dim {
                         output[out_offset + d] += weight * v_vec[d];
@@ -641,18 +619,25 @@ impl FeedForward {
         m: usize,
         k: usize,
         n: usize,
+        transposed_b: bool,
         #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
     ) -> Result<Vec<f32>> {
         #[cfg(feature = "gpu")]
         if let Some(gpu) = gpu {
-            if let Ok(result) = gpu.matmul(a, b, m as u32, k as u32, n as u32) {
-                return Ok(result);
+            if !transposed_b {
+                if let Ok(result) = gpu.matmul(a, b, m as u32, k as u32, n as u32) {
+                    return Ok(result);
+                }
             }
         }
 
         // CPU fallback
         let mut result = vec![0.0; m * n];
-        matmul_f32(a, b, &mut result, m, k, n)?;
+        if transposed_b {
+            matmul_transposed(a, b, &mut result, m, k, n)?;
+        } else {
+            matmul_f32(a, b, &mut result, m, k, n)?;
+        }
         Ok(result)
     }
 
@@ -673,6 +658,7 @@ impl FeedForward {
             seq_len,
             hidden_size,
             intermediate_size,
+            true,
             #[cfg(feature = "gpu")]
             gpu,
         )?;
@@ -684,6 +670,7 @@ impl FeedForward {
             seq_len,
             hidden_size,
             intermediate_size,
+            true,
             #[cfg(feature = "gpu")]
             gpu,
         )?;
@@ -703,6 +690,7 @@ impl FeedForward {
             seq_len,
             intermediate_size,
             hidden_size,
+            true,
             #[cfg(feature = "gpu")]
             gpu,
         )?;
@@ -823,14 +811,14 @@ impl TransformerLayer {
             // Compute RMS exactly like llama.cpp:
             // 1. Sum of squares
             // 2. Mean = sum / n
-            // 3. Scale = 1 / sqrt(mean + eps)
+            // 3. RMS = sqrt(mean + eps)
             let sum_sq: f32 = slice.iter().map(|&x| x * x).sum();
             let mean = sum_sq / hidden_size as f32;
-            let scale = 1.0 / (mean + self.attention.config.rms_norm_eps).sqrt();
+            let rms = (mean + self.attention.config.rms_norm_eps).sqrt();
 
             // Normalize and scale by weight
             for i in 0..hidden_size {
-                output[offset + i] = slice[i] * scale * weight[i];
+                output[offset + i] = (slice[i] / rms) * weight[i];
             }
         }
 
@@ -1061,21 +1049,33 @@ impl Model {
     /// Matrix multiplication with GPU/CPU fallback
     ///
     /// Tries GPU first (if enabled), falls back to CPU
-    fn matmul(&self, a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Result<Vec<f32>> {
+    ///
+    /// # Arguments
+    /// * `transposed_b` - If true, B is stored as [n, k] (GGUF format) and will use efficient transpose matmul
+    fn matmul(&self, a: &[f32], b: &[f32], m: usize, k: usize, n: usize, transposed_b: bool) -> Result<Vec<f32>> {
         #[cfg(feature = "gpu")]
         if let Some(ref gpu) = self.gpu {
             // Try GPU matmul
-            match gpu.matmul(a, b, m as u32, k as u32, n as u32) {
-                Ok(result) => return Ok(result),
-                Err(e) => {
-                    eprintln!("⚠️  GPU matmul failed: {}, falling back to CPU", e);
+            // TODO: GPU also needs to handle transposed case
+            if !transposed_b {
+                match gpu.matmul(a, b, m as u32, k as u32, n as u32) {
+                    Ok(result) => return Ok(result),
+                    Err(e) => {
+                        eprintln!("⚠️  GPU matmul failed: {}, falling back to CPU", e);
+                    }
                 }
             }
         }
 
         // CPU fallback
         let mut result = vec![0.0; m * n];
-        matmul_f32(a, b, &mut result, m, k, n)?;
+        if transposed_b {
+            // B is stored as [n, k] (GGUF format), use optimized transpose matmul
+            matmul_transposed(a, b, &mut result, m, k, n)?;
+        } else {
+            // Standard matmul: B is [k, n]
+            matmul_f32(a, b, &mut result, m, k, n)?;
+        }
         Ok(result)
     }
 
@@ -1117,12 +1117,12 @@ impl Model {
             );
 
             println!(
-                "🔍 Loading token embeddings as-is: [hidden_size={}, vocab_size={}]",
-                self.config.hidden_size, self.config.vocab_size
+                "🔍 Loading token embeddings as-is: [vocab_size={}, hidden_size={}]",
+                self.config.vocab_size, self.config.hidden_size
             );
-            // GGUF stores token_embd.weight as [hidden_size, vocab_size]
-            // Our embedding lookup (line 1339-1340) correctly handles this format
-            // by gathering column token_id from each row
+            // GGUF stores token_embd.weight as [vocab_size, hidden_size]
+            // Our embedding lookup (line 1342) correctly handles this format
+            // by gathering row token_id from the matrix
             self.token_embeddings.copy_from_slice(embedding_data);
             eprintln!(
                 "  Embeddings preview (first 20): {:?}",
@@ -1133,7 +1133,16 @@ impl Model {
 
         // Load output norm
         if let Ok(norm_data) = tensor_loader.load_tensor("output_norm.weight", parser) {
+            eprintln!("LOADED 'output_norm.weight' raw.len={}", norm_data.len());
+            tensor_stats("output_norm.weight (raw)", norm_data);
+            
+            // Load raw weights without arbitrary scaling
             self.output_norm.copy_from_slice(norm_data);
+            
+            tensor_stats("output_norm.weight (model)", &self.output_norm);
+            println!("✅ Output norm loaded");
+        } else {
+            eprintln!("WARN: Failed to load output_norm.weight");
         }
 
         // Load LM head - try different tensor names
@@ -1143,9 +1152,14 @@ impl Model {
             tensor_stats("output.weight (raw)", lm_head_data);
 
             println!("🔍 Loading LM head tensor: {} elements", lm_head_data.len());
-            // GGUF stores output.weight as [hidden_size, vocab_size] already
-            // No transpose needed!
-            self.lm_head.copy_from_slice(lm_head_data);
+            // GGUF stores output.weight as [vocab_size, hidden_size]
+            // We need to transpose it to [hidden_size, vocab_size] for matmul
+            let lm_head_transposed = transpose_matrix(
+                lm_head_data,
+                self.config.vocab_size,
+                self.config.hidden_size,
+            );
+            self.lm_head.copy_from_slice(&lm_head_transposed);
             tensor_stats("output.weight (model)", &self.lm_head);
             println!(
                 "✅ LM head loaded (shape: [hidden_size={}, vocab_size={}])",
@@ -1155,14 +1169,28 @@ impl Model {
             println!("✅ Found 'lm_head.weight'");
             eprintln!("LOADED 'lm_head.weight' raw.len={}", lm_head_data.len());
             tensor_stats("lm_head.weight (raw)", lm_head_data);
-            self.lm_head.copy_from_slice(lm_head_data);
+            // GGUF stores lm_head.weight as [vocab_size, hidden_size]
+            // We need to transpose it to [hidden_size, vocab_size] for matmul
+            let lm_head_transposed = transpose_matrix(
+                lm_head_data,
+                self.config.vocab_size,
+                self.config.hidden_size,
+            );
+            self.lm_head.copy_from_slice(&lm_head_transposed);
             tensor_stats("lm_head.weight (model)", &self.lm_head);
             println!("✅ LM head loaded");
         } else if let Ok(lm_head_data) = tensor_loader.load_tensor("model.lm_head.weight", parser) {
             println!("✅ Found 'model.lm_head.weight'");
             eprintln!("LOADED 'model.lm_head.weight' raw.len={}", lm_head_data.len());
             tensor_stats("model.lm_head.weight (raw)", lm_head_data);
-            self.lm_head.copy_from_slice(lm_head_data);
+            // GGUF stores model.lm_head.weight as [vocab_size, hidden_size]
+            // We need to transpose it to [hidden_size, vocab_size] for matmul
+            let lm_head_transposed = transpose_matrix(
+                lm_head_data,
+                self.config.vocab_size,
+                self.config.hidden_size,
+            );
+            self.lm_head.copy_from_slice(&lm_head_transposed);
             tensor_stats("model.lm_head.weight (model)", &self.lm_head);
             println!("✅ LM head loaded");
         } else {
@@ -1220,40 +1248,33 @@ impl Model {
             };
 
             if let Ok(wq) = tensor_loader.load_tensor(&wq_name, parser) {
-                if layer_idx == 0 {
-                    eprintln!("LOADED '{}' raw.len={}", wq_name, wq.len());
-                    tensor_stats(&format!("{} (raw)", wq_name), wq);
-                }
+                // Use GGUF weights directly - no transpose needed
+                // matmul_transposed will handle the orientation efficiently
                 layer.attention_weights.wq.copy_from_slice(wq);
                 if layer_idx == 0 {
+                    eprintln!("LOADED '{}' raw.len={}", wq_name, wq.len());
                     tensor_stats(&format!("{} (model)", wq_name), &layer.attention_weights.wq);
                 }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wq_name);
             }
             if let Ok(wk) = tensor_loader.load_tensor(&wk_name, parser) {
-                if layer_idx == 0 {
-                    eprintln!("LOADED '{}' raw.len={}", wk_name, wk.len());
-                    tensor_stats(&format!("{} (raw)", wk_name), wk);
-                }
-                // GGUF stores as [hidden_size, kv_dim] - NO TRANSPOSE NEEDED!
-                // Our matmul expects [hidden_size, kv_dim], which matches GGUF
+                // Use GGUF weights directly - no transpose needed
+                // matmul_transposed will handle the orientation efficiently
                 layer.attention_weights.wk.copy_from_slice(wk);
                 if layer_idx == 0 {
+                    eprintln!("LOADED '{}' raw.len={}", wk_name, wk.len());
                     tensor_stats(&format!("{} (model)", wk_name), &layer.attention_weights.wk);
                 }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wk_name);
             }
             if let Ok(wv) = tensor_loader.load_tensor(&wv_name, parser) {
-                if layer_idx == 0 {
-                    eprintln!("LOADED '{}' raw.len={}", wv_name, wv.len());
-                    tensor_stats(&format!("{} (raw)", wv_name), wv);
-                }
-                // GGUF stores as [hidden_size, kv_dim] - NO TRANSPOSE NEEDED!
-                // Our matmul expects [hidden_size, kv_dim], which matches GGUF
+                // Use GGUF weights directly - no transpose needed
+                // matmul_transposed will handle the orientation efficiently
                 layer.attention_weights.wv.copy_from_slice(wv);
                 if layer_idx == 0 {
+                    eprintln!("LOADED '{}' raw.len={}", wv_name, wv.len());
                     tensor_stats(&format!("{} (model)", wv_name), &layer.attention_weights.wv);
                 }
             } else if layer_idx == 0 {
@@ -1346,19 +1367,18 @@ impl Model {
         }
 
         // 1. Embed tokens
-        // GGUF stores embeddings as [hidden_size, vocab_size]
-        // So for token_id, we need to gather column token_id from each row
+        // GGUF stores embeddings as [vocab_size, hidden_size]
+        // So for token_id, we need to gather row token_id from the matrix
         let mut hidden_states = vec![0.0; seq_len * hidden_size];
-        let vocab_size = self.config.vocab_size;
 
         for (seq_idx, &token_id) in token_ids.iter().enumerate() {
             let out_start = seq_idx * hidden_size;
 
-            // Gather embedding for this token from the [hidden_size, vocab_size] matrix
-            // Element [row, col] is at index row * vocab_size + col
-            // So embedding dimension i for token_id is at: i * vocab_size + token_id
+            // Gather embedding for this token from the [vocab_size, hidden_size] matrix
+            // Element [row, col] is at index row * hidden_size + col
+            // So embedding dimension i for token_id is at: token_id * hidden_size + i
             for dim_idx in 0..hidden_size {
-                let emb_idx = dim_idx * vocab_size + (token_id as usize);
+                let emb_idx = (token_id as usize) * hidden_size + dim_idx;
                 if emb_idx < self.token_embeddings.len() {
                     hidden_states[out_start + dim_idx] = self.token_embeddings[emb_idx];
                 } else {
@@ -1370,7 +1390,10 @@ impl Model {
 
         if debug {
             let sum: f32 = hidden_states.iter().take(10).sum();
-            eprintln!("  Embeddings sum(first 10): {:.6}", sum);
+            let mean: f32 = hidden_states.iter().sum::<f32>() / hidden_states.len() as f32;
+            let max: f32 = hidden_states.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let min: f32 = hidden_states.iter().copied().fold(f32::INFINITY, f32::min);
+            eprintln!("  Embeddings sum(first 10): {:.6}, mean: {:.6}, min: {:.6}, max: {:.6}", sum, mean, min, max);
         }
 
         // 2. Pass through transformer layers
@@ -1397,6 +1420,24 @@ impl Model {
 
         // 3. Final normalization
         hidden_states = self.rms_norm(&hidden_states, &self.output_norm)?;
+
+        // DEBUG: Validate hidden states after final RMSNorm
+        if debug {
+            let sum: f32 = hidden_states.iter().sum::<f32>();
+            let mean: f32 = sum / hidden_states.len() as f32;
+            let max: f32 = hidden_states.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let min: f32 = hidden_states.iter().copied().fold(f32::INFINITY, f32::min);
+            let abs_max: f32 = hidden_states.iter().copied().map(f32::abs).fold(f32::NEG_INFINITY, f32::max);
+            eprintln!("  Final hidden states: mean: {:.6}, min: {:.6}, max: {:.6}, abs_max: {:.6}", mean, min, max, abs_max);
+            
+            // Check for reasonable ranges
+            if abs_max > 10.0 {
+                eprintln!("  ⚠️  WARNING: Hidden states have large values (abs_max={:.6})", abs_max);
+            }
+            if mean.abs() > 1.0 {
+                eprintln!("  ⚠️  WARNING: Hidden states have large mean (mean={:.6})", mean);
+            }
+        }
 
         // 4. Project to vocabulary (LM head)
         let vocab_size = self.config.vocab_size;
@@ -1445,7 +1486,35 @@ impl Model {
         }
 
         let logits =
-            self.matmul(&hidden_states, &self.lm_head, seq_len, hidden_size, vocab_size)?;
+            self.matmul(&hidden_states, &self.lm_head, seq_len, hidden_size, vocab_size, false)?;
+
+        // DEBUG: Validate logits
+        if debug {
+            let sum: f32 = logits.iter().sum::<f32>();
+            let mean: f32 = sum / logits.len() as f32;
+            let max: f32 = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let min: f32 = logits.iter().copied().fold(f32::INFINITY, f32::min);
+            let abs_max: f32 = logits.iter().copied().map(f32::abs).fold(f32::NEG_INFINITY, f32::max);
+            let nan_count = logits.iter().filter(|&&x| x.is_nan()).count();
+            let inf_count = logits.iter().filter(|&&x| x.is_infinite()).count();
+            
+            eprintln!("  Logits: mean: {:.6}, min: {:.6}, max: {:.6}, abs_max: {:.6}, nan: {}, inf: {}", 
+                     mean, min, max, abs_max, nan_count, inf_count);
+            
+            // Check for reasonable ranges
+            if abs_max > 20.0 {
+                eprintln!("  ⚠️  WARNING: Logits have very large values (abs_max={:.6})", abs_max);
+            }
+            if mean.abs() > 5.0 {
+                eprintln!("  ⚠️  WARNING: Logits have large mean (mean={:.6})", mean);
+            }
+            if nan_count > 0 {
+                eprintln!("  ❌ ERROR: Logits contain NaN values!");
+            }
+            if inf_count > 0 {
+                eprintln!("  ❌ ERROR: Logits contain infinite values!");
+            }
+        }
 
         // DEBUG: Check logits after matmul
         if std::env::var("DEBUG_LOGITS").is_ok() {
@@ -1563,40 +1632,6 @@ impl Model {
         }
 
         Ok(logits)
-    }
-
-    /// Apply repetition penalty to logits
-    ///
-    /// # Arguments
-    /// * `logits` - Logits to modify
-    /// * `tokens` - Previously generated tokens
-    /// * `penalty` - Repetition penalty (1.0 = no penalty, >1.0 = discourage repetition)
-    fn apply_repetition_penalty(&self, logits: &mut [f32], tokens: &[u32], penalty: f32) {
-        if penalty == 1.0 || tokens.is_empty() {
-            return;
-        }
-
-        if std::env::var("DEBUG_REP").is_ok() {
-            eprintln!("  Applying repetition penalty {} to {} tokens", penalty, tokens.len());
-        }
-
-        for &token_id in tokens {
-            let idx = token_id as usize;
-            if idx < logits.len() {
-                let old_logit = logits[idx];
-                // If logit is positive, divide by penalty (reduce it)
-                // If logit is negative, multiply by penalty (make it more negative)
-                if logits[idx] > 0.0 {
-                    logits[idx] /= penalty;
-                } else {
-                    logits[idx] *= penalty;
-                }
-
-                if std::env::var("DEBUG_REP").is_ok() && token_id == 10532 {
-                    eprintln!("    Token 10532: {:.6} -> {:.6}", old_logit, logits[idx]);
-                }
-            }
-        }
     }
 
     /// Sample next token from logits
@@ -1838,7 +1873,7 @@ impl Model {
 
                 let next = logits_processor
                     .sample(&mut last_logits)
-                    .map_err(|e| Error::ParseError(e))?;
+                    .map_err(Error::ParseError)?;
 
                 // ALWAYS show sampled token for debugging
                 eprintln!("🎲 Sampled token: {} (logit: {:.6})", next, last_logits[next as usize]);
@@ -1928,7 +1963,7 @@ impl Model {
                 // Generate new token
                 next = logits_processor
                     .sample(&mut last_logits)
-                    .map_err(|e| Error::ParseError(e))?;
+                    .map_err(Error::ParseError)?;
 
                 // Check for EOS
                 if next == tokenizer.special_tokens().eos_token_id {
