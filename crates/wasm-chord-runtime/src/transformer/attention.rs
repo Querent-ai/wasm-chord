@@ -83,7 +83,7 @@ impl MultiHeadAttention {
             seq_len,
             hidden_size,
             hidden_size,
-            true,
+            false, // CORRECT: GGUF stores weights in standard format
             #[cfg(feature = "gpu")]
             gpu,
         )?;
@@ -111,7 +111,7 @@ impl MultiHeadAttention {
             seq_len,
             hidden_size,
             self.config.num_kv_heads * self.head_dim,
-            true,
+            false, // CORRECT: GGUF stores weights in standard format
             #[cfg(feature = "gpu")]
             gpu,
         )?;
@@ -123,7 +123,7 @@ impl MultiHeadAttention {
             seq_len,
             hidden_size,
             self.config.num_kv_heads * self.head_dim,
-            true,
+            false, // CORRECT: GGUF stores weights in standard format
             #[cfg(feature = "gpu")]
             gpu,
         )?;
@@ -163,7 +163,7 @@ impl MultiHeadAttention {
 
             if std::env::var("DEBUG_KV").is_ok() {
                 eprintln!(
-                    "  KV cache: current_seq_len={}, cached_k.len()={}",
+                    "  After append: kv_cache.current_seq_len={}, cached_k.len()={}",
                     kv_cache.current_seq_len,
                     cached_k.len()
                 );
@@ -185,7 +185,7 @@ impl MultiHeadAttention {
             seq_len,
             hidden_size,
             hidden_size,
-            true,
+            false, // CORRECT: GGUF stores weights in standard format
             #[cfg(feature = "gpu")]
             gpu,
         )?;

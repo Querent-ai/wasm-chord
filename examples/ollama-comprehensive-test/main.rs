@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("============================");
 
     let mut matches = 0;
-    let mut total_tests = test_cases.len();
+    let total_tests = test_cases.len();
 
     for (prompt, expected_start) in test_cases {
         // Tokenize prompt

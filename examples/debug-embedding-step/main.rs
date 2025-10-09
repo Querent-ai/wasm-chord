@@ -1,7 +1,7 @@
 /// Debug embedding lookup step by step
 use std::fs::File;
 use std::io::BufReader;
-use wasm_chord_core::{GGUFParser, TensorLoader, Tokenizer};
+use wasm_chord_core::{GGUFParser, TensorLoader};
 use wasm_chord_runtime::{Model, TransformerConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

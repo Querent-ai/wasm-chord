@@ -44,7 +44,7 @@ members = [
     "examples/find-token-id",
     "examples/logit-analysis",
     "examples/debug-performance",
-    "examples/quality-test",
+    "examples/wasm-memory64-multi-test",
     "examples/gpu-test",
     "examples/gpu-cpu-comparison",
     "examples/cache-test",
@@ -55,6 +55,7 @@ members = [
     "examples/wasm-10gb-test",
     "examples/fused-kernels-test",
     "examples/cache-performance-test",
+    "examples/debug-forward-pass",
 ]
 
 [workspace.package]

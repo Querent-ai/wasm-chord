@@ -109,7 +109,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // All scores in [0, 1]
     for &score in &scores {
-        assert!(score >= 0.0 && score <= 1.0, "Score out of range: {}", score);
+        assert!((0.0..=1.0).contains(&score), "Score out of range: {}", score);
     }
 
     // Determinism check
@@ -252,7 +252,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Softmax should still produce valid probabilities
     for &score in &scores {
         assert!(score.is_finite(), "Score should be finite");
-        assert!(score >= 0.0 && score <= 1.0, "Score should be in [0,1]");
+        assert!((0.0..=1.0).contains(&score), "Score should be in [0,1]");
     }
 
     // Rows should sum to 1

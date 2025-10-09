@@ -92,6 +92,7 @@ fn tensor_stats(name: &str, data: &[f32]) {
 }
 
 /// Naive matmul reference (row-major)
+#[allow(dead_code)]
 fn matmul_naive(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
     let mut r = vec![0.0f32; m * n];
     for i in 0..m {
@@ -107,6 +108,7 @@ fn matmul_naive(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> 
 }
 
 /// Test matmul implementation for small sizes and random values
+#[allow(dead_code)]
 fn matmul_self_test() -> Result<()> {
     use rand::Rng;
     let mut rng = rand::thread_rng();
@@ -148,23 +150,22 @@ fn matmul_self_test() -> Result<()> {
 }
 
 // Helper function to manually compute a single logit for verification
+// Assumes `lm_head` is stored as [vocab_size, hidden_size] (GGUF / row-major).
 fn compute_manual_logit(
     hidden_states: &[f32],
     lm_head: &[f32],
     token_id: usize,
     hidden_size: usize,
+    _vocab_size: usize,
 ) -> f32 {
-    // The matmul treats hidden_states as [seq_len, hidden_size] where seq_len=1
-    // and lm_head as [hidden_size, vocab_size]
-    // So for the first (and only) sequence position, we compute:
-    // logit = sum(hidden_states[i] * lm_head[i * vocab_size + token_id]) for i in 0..hidden_size
-
-    let vocab_size = 32000;
+    // logit = sum_i hidden[i] * lm_head[token_id, i]
+    // index for lm_head[token_id, i] in row-major [vocab_size, hidden_size] is:
+    //   token_id * hidden_size + i
     let mut sum = 0.0f32;
-    for (i, hidden_state) in hidden_states.iter().enumerate().take(hidden_size) {
-        let weight_idx = i * vocab_size + token_id;
+    for (i, &hidden_val) in hidden_states.iter().enumerate().take(hidden_size) {
+        let weight_idx = token_id * hidden_size + i;
         if weight_idx < lm_head.len() {
-            sum += hidden_state * lm_head[weight_idx];
+            sum += hidden_val * lm_head[weight_idx];
         }
     }
     sum
@@ -264,10 +265,10 @@ impl Model {
     ) -> Result<()> {
         use wasm_chord_core::error::Error;
 
-        // Run matmul self-test first
-        eprintln!("🧪 Running matmul self-test...");
-        matmul_self_test()?;
-        eprintln!("✅ Matmul self-test passed!");
+        // Run focused debugging
+        eprintln!("🧪 Running focused debugging...");
+        super::focused_debug::run_focused_debugging()?;
+        eprintln!("✅ All focused debugging tests passed!");
 
         // Load token embeddings - try different tensor names
         let embedding_data = if let Ok(data) =
@@ -455,6 +456,45 @@ impl Model {
                 eprintln!("WARN: Failed to load {}", wo_name);
             }
 
+            // Debug attention weight orientation for first layer after all weights are loaded
+            if layer_idx == 0 {
+                eprintln!("🔍 Debugging attention weight orientation for layer 0...");
+                super::debug_weights::check_attention_weight_orientation(
+                    &layer.attention_weights.wq,
+                    &layer.attention_weights.wk,
+                    &layer.attention_weights.wv,
+                    &layer.attention_weights.wo,
+                    self.config.hidden_size,
+                )?;
+
+                // Check if we need to transpose weights
+                let wq_sum = layer.attention_weights.wq.iter().sum::<f32>();
+                let wq_mean = wq_sum / layer.attention_weights.wq.len() as f32;
+                let wq_variance =
+                    layer.attention_weights.wq.iter().map(|x| (x - wq_mean).powi(2)).sum::<f32>()
+                        / layer.attention_weights.wq.len() as f32;
+
+                eprintln!(
+                    "WQ stats: sum={:.6}, mean={:.6}, variance={:.6}",
+                    wq_sum, wq_mean, wq_variance
+                );
+
+                // DISABLED: Variance check is fundamentally flawed
+                // Low variance doesn't indicate wrong orientation!
+                // if wq_variance < 0.001 {
+                //     eprintln!("⚠️  WQ has very low variance - may need transposing!");
+                //     eprintln!("🔧 Attempting to transpose attention weights...");
+                //     super::debug_weights::transpose_attention_weights(
+                //         &mut layer.attention_weights.wq,
+                //         &mut layer.attention_weights.wk,
+                //         &mut layer.attention_weights.wv,
+                //         &mut layer.attention_weights.wo,
+                //         self.config.hidden_size,
+                //     )?;
+                //     eprintln!("✅ Attention weights transposed!");
+                // }
+            }
+
             // Attention norm
             let attn_norm_name = format!("blk.{}.attn_norm.weight", layer_idx);
             if let Ok(norm) = tensor_loader.load_tensor(&attn_norm_name, parser) {
@@ -614,6 +654,11 @@ impl Model {
         // 4. Project to vocabulary (LM head)
         let vocab_size = self.config.vocab_size;
 
+        // OPTIMIZATION: Extract only last token's hidden state before LM head
+        // This avoids computing logits for all prompt tokens during prefill
+        let last_hidden_start = (seq_len - 1) * hidden_size;
+        let last_hidden = &hidden_states[last_hidden_start..last_hidden_start + hidden_size];
+
         // DEBUG: Check hidden states before LM head
         if std::env::var("DEBUG_LOGITS").is_ok() {
             eprintln!("🔍 HIDDEN STATES BEFORE LM HEAD:");
@@ -622,21 +667,28 @@ impl Model {
                 "  seq_len = {}, hidden_size = {}, vocab_size = {}",
                 seq_len, hidden_size, vocab_size
             );
+            eprintln!(
+                "  Using only last token's hidden state ({}:{})",
+                last_hidden_start,
+                last_hidden_start + hidden_size
+            );
 
             // Check first few values
-            let preview_len = 10.min(hidden_states.len());
-            eprintln!("  hidden_states preview: {:?}", &hidden_states[..preview_len]);
+            let preview_len = 10.min(last_hidden.len());
+            eprintln!("  last_hidden preview: {:?}", &last_hidden[..preview_len]);
 
             // Check statistics
-            let sum: f32 = hidden_states.iter().sum();
-            let mean = sum / hidden_states.len() as f32;
-            let max = hidden_states.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-            let min = hidden_states.iter().copied().fold(f32::INFINITY, f32::min);
-            let nan_count = hidden_states.iter().filter(|&&x| x.is_nan()).count();
-            let inf_count = hidden_states.iter().filter(|&&x| x.is_infinite()).count();
+            let sum: f32 = last_hidden.iter().sum();
+            let mean = sum / last_hidden.len() as f32;
+            let max = last_hidden.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let min = last_hidden.iter().copied().fold(f32::INFINITY, f32::min);
+            let nan_count = last_hidden.iter().filter(|&&x| x.is_nan()).count();
+            let inf_count = last_hidden.iter().filter(|&&x| x.is_infinite()).count();
 
-            eprintln!("  hidden_states stats: sum={:.6}, mean={:.6}, min={:.6}, max={:.6}, nan={}, inf={}",
-                     sum, mean, min, max, nan_count, inf_count);
+            eprintln!(
+                "  last_hidden stats: sum={:.6}, mean={:.6}, min={:.6}, max={:.6}, nan={}, inf={}",
+                sum, mean, min, max, nan_count, inf_count
+            );
 
             // Check LM head weights
             eprintln!("🔍 LM HEAD WEIGHTS:");
@@ -657,8 +709,8 @@ impl Model {
             );
         }
 
-        let logits =
-            self.matmul(&hidden_states, &self.lm_head, seq_len, hidden_size, vocab_size, true)?;
+        // Compute logits only for the last token (seq_len = 1)
+        let logits = self.matmul(last_hidden, &self.lm_head, 1, hidden_size, vocab_size, true)?;
 
         // DEBUG: Validate logits
         if debug {
@@ -741,8 +793,13 @@ impl Model {
             // MANUAL VERIFICATION: Compute a few logits manually to check matmul
             eprintln!("🔍 MANUAL MATMUL VERIFICATION:");
             let top_token_id = sorted_logits[0].0;
-            let manual_logit =
-                compute_manual_logit(&hidden_states, &self.lm_head, top_token_id, hidden_size);
+            let manual_logit = compute_manual_logit(
+                &hidden_states,
+                &self.lm_head,
+                top_token_id,
+                hidden_size,
+                vocab_size,
+            );
             let matmul_logit = logits[top_token_id];
             eprintln!(
                 "  Token {}: matmul={:.6}, manual={:.6}, diff={:.6}",
@@ -806,6 +863,7 @@ impl Model {
             eprintln!("========================");
         }
 
+        // Logits are already just for the last token (we computed them that way above)
         Ok(logits)
     }
 
@@ -962,8 +1020,8 @@ impl Model {
         // Clear KV cache for new generation
         self.clear_kv_cache();
 
-        // Encode prompt
-        let mut tokens = tokenizer.encode(prompt, false)?;
+        // Encode prompt (with BOS token)
+        let mut tokens = tokenizer.encode(prompt, true)?;
 
         // DEBUG: Dump tokenization details
         eprintln!("PROMPT_STR = {:?}", prompt);
@@ -974,117 +1032,62 @@ impl Model {
         }
 
         let num_prompt_tokens = tokens.len();
-        let mut pos = 0;
-        // Don't initialize token here - we'll get it from tokens[pos] in the loop
 
         if std::env::var("DEBUG").is_ok() {
             eprintln!("DEBUG: Starting generation with {} prompt tokens", num_prompt_tokens);
         }
 
-        // Main generation loop - handles both prompt processing and token generation
-        // This follows the llama2.c pattern exactly
-        while pos < num_prompt_tokens + max_tokens - 1 {
-            // Get the current token to process
-            let token = if pos < num_prompt_tokens {
-                tokens[pos] // Process prompt token
-            } else {
-                tokens[tokens.len() - 1] // Process last generated token
-            };
+        // PREFILL PHASE: Process all prompt tokens at once
+        eprintln!("🔥 PREFILL: Processing {} prompt tokens at once", num_prompt_tokens);
+        let logits = self.forward(&tokens, 0)?;
 
-            // CRITICAL FIX: Position should match KV cache state
-            // During prompt processing: pos = 0, 1, 2, ..., num_prompt_tokens-1
-            // During generation: position = num_prompt_tokens, num_prompt_tokens+1, ...
-            let cache_position = if pos < num_prompt_tokens {
-                pos
+        // Get logits for the last prompt token (this is what we use to generate the first new token)
+        let mut last_logits = logits.clone();
+
+        // Sample first generated token
+        let next = logits_processor.sample(&mut last_logits).map_err(Error::ParseError)?;
+        tokens.push(next);
+
+        eprintln!("  Sampled first token: {}", next);
+
+        // DECODE PHASE: Generate tokens one at a time
+        let mut generated = 1;
+        while generated < max_tokens {
+            // Forward pass with just the last generated token
+            let last_token = tokens[tokens.len() - 1];
+
+            // Use KV cache position, not absolute position
+            let cache_position = if !self.kv_caches.is_empty() {
+                self.kv_caches[0].current_seq_len
             } else {
-                // After prompt, position = current sequence length in KV cache
                 tokens.len() - 1
             };
 
-            // DEBUG: Dump token processing details
-            eprintln!("TOKENS (len={}): {:?}", tokens.len(), tokens);
-            if pos < num_prompt_tokens {
-                eprintln!(
-                    "  processing prompt token at pos {} -> id {} (cache_pos={})",
-                    pos, token, cache_position
-                );
-            } else {
-                eprintln!(
-                    "  processing generated token at pos {} -> id {} (cache_pos={})",
-                    pos, token, cache_position
-                );
+            eprintln!(
+                "🔄 DECODE: Processing token {} at cache position {}",
+                last_token, cache_position
+            );
+            last_logits = self.forward(&[last_token], cache_position)?;
+
+            // Sample next token
+            let next = logits_processor.sample(&mut last_logits).map_err(Error::ParseError)?;
+
+            // Show sampled token
+            let token_text = tokenizer.id_to_token(next).unwrap_or("<unknown>");
+            eprintln!("  Sampled: {} ({})", next, token_text);
+
+            // Check for EOS token
+            if next == tokenizer.special_tokens().eos_token_id {
+                eprintln!("  EOS token detected, stopping generation");
+                break;
             }
 
-            // Forward pass: process current token at correct cache position
-            if std::env::var("DEBUG").is_ok() {
-                eprintln!("DEBUG: pos={}, token={}, cache_position={}", pos, token, cache_position);
-            }
-
-            // Check KV cache state before forward
-            if std::env::var("DEBUG_KV").is_ok() && !self.kv_caches.is_empty() {
-                eprintln!("  KV cache current_seq_len={}", self.kv_caches[0].current_seq_len);
-            }
-
-            let logits = self.forward(&[token], cache_position)?;
-
-            // Check KV cache state after forward
-            if std::env::var("DEBUG_KV").is_ok() && !self.kv_caches.is_empty() {
-                eprintln!("  KV cache current_seq_len after={}", self.kv_caches[0].current_seq_len);
-            }
-
-            // Get logits for the last position
-            let mut last_logits = logits[(logits.len() - self.config.vocab_size)..].to_vec();
-
-            // Determine next token
-            if pos < num_prompt_tokens - 1 {
-                // Still processing prompt - skip sampling (already have next token in sequence)
-                // Just continue to next position
-            } else {
-                // Past prompt - sample next token from logits
-                // Debug: print top 5 logits before sampling
-                if std::env::var("DEBUG_LOGITS").is_ok() {
-                    let mut indexed: Vec<(usize, f32)> =
-                        last_logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
-                    indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-                    eprintln!("  Top 5 logits:");
-                    for (i, (idx, val)) in indexed.iter().take(5).enumerate() {
-                        eprintln!("    {}: token {} = {:.6}", i, idx, val);
-                    }
-                }
-
-                // ALWAYS show top logits for debugging coherence
-                let mut indexed: Vec<(usize, f32)> =
-                    last_logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
-                indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-                eprintln!("🎯 Top 5 logits for sampling:");
-                for (i, (idx, val)) in indexed.iter().take(5).enumerate() {
-                    let token_text = tokenizer.id_to_token(*idx as u32).unwrap_or("<unknown>");
-                    eprintln!("    {}: token {} ({}) = {:.6}", i, idx, token_text, val);
-                }
-
-                // LogitsProcessor automatically tracks tokens for repetition penalty
-
-                let next = logits_processor.sample(&mut last_logits).map_err(Error::ParseError)?;
-
-                // ALWAYS show sampled token for debugging
-                let token_text = tokenizer.id_to_token(next).unwrap_or("<unknown>");
-                eprintln!(
-                    "🎲 Sampled token: {} ({}) logit: {:.6}",
-                    next, token_text, last_logits[next as usize]
-                );
-
-                // Check for EOS token
-                if next == tokenizer.special_tokens().eos_token_id {
-                    break;
-                }
-
-                // Add generated token to our sequence
-                tokens.push(next);
-            }
-
-            // Advance position for next iteration
-            pos += 1;
+            // Add generated token to our sequence
+            tokens.push(next);
+            generated += 1;
         }
+
+        eprintln!("✅ Generation complete: {} tokens generated", generated);
 
         // Decode all tokens to text (skip special tokens)
         let generated_text = tokenizer.decode(&tokens, true)?;
@@ -1133,49 +1136,87 @@ impl Model {
         // Clear KV cache for new generation
         self.clear_kv_cache();
 
-        // Encode prompt
-        let mut tokens = tokenizer.encode(prompt, false)?;
+        // Encode prompt (with BOS token)
+        let mut tokens = tokenizer.encode(prompt, true)?;
 
         if tokens.is_empty() {
             return Err(Error::ParseError("Empty token sequence".to_string()));
         }
 
         let num_prompt_tokens = tokens.len();
-        let mut pos = 0;
-        let mut token = tokens[0];
 
-        // Main generation loop
+        // PHASE 1: PREFILL - Process prompt tokens in chunks to avoid memory issues
+        eprintln!("🔥 PREFILL: Processing {} prompt tokens in chunks", num_prompt_tokens);
+
+        // Process prompt tokens in chunks of 8 to avoid memory issues
+        let chunk_size = 8;
+        let mut prefill_logits = Vec::new();
+
+        for chunk_start in (0..num_prompt_tokens).step_by(chunk_size) {
+            let chunk_end = (chunk_start + chunk_size).min(num_prompt_tokens);
+            let chunk = &tokens[chunk_start..chunk_end];
+            let chunk_logits = self.forward(chunk, chunk_start)?;
+            prefill_logits.extend(chunk_logits);
+        }
+
+        // DEBUG: show kv cache lengths after prefill
+        if std::env::var("DEBUG_KV").is_ok() {
+            eprintln!("  After prefill:");
+            for (li, cache) in self.kv_caches.iter().enumerate() {
+                eprintln!("  KV layer {} current_seq_len={}", li, cache.current_seq_len);
+            }
+        }
+
+        // Get the last token's logits for the first generation step
+        let mut last_logits =
+            prefill_logits[(prefill_logits.len() - self.config.vocab_size)..].to_vec();
+
+        // PHASE 2: DECODE - Process ONE new token at a time
+        eprintln!("🎯 DECODE: Starting generation phase");
+        let mut pos = num_prompt_tokens;
+
         while pos < num_prompt_tokens + max_tokens - 1 {
-            let logits = self.forward(&[token], pos)?;
+            // Generate next token
+            let next = logits_processor.sample(&mut last_logits).map_err(Error::ParseError)?;
 
-            let mut last_logits = logits[(logits.len() - self.config.vocab_size)..].to_vec();
+            // Check for EOS
+            if next == tokenizer.special_tokens().eos_token_id {
+                break;
+            }
 
-            let next;
-            if pos < num_prompt_tokens - 1 {
-                // Still processing prompt
-                next = tokens[pos + 1];
+            // Add to output
+            tokens.push(next);
+
+            // Process the new token at the correct position
+            let cache_position = if !self.kv_caches.is_empty() {
+                self.kv_caches[0].current_seq_len
             } else {
-                // Generate new token
-                next = logits_processor.sample(&mut last_logits).map_err(Error::ParseError)?;
+                tokens.len() - 1
+            };
 
-                // Check for EOS
-                if next == tokenizer.special_tokens().eos_token_id {
-                    break;
-                }
+            eprintln!("🔄 DECODE: Processing token {} at position {}", next, cache_position);
+            let logits = self.forward(&[next], cache_position)?;
 
-                tokens.push(next);
-
-                // Decode just this token and call callback
-                let token_text = tokenizer.decode(&[next], true)?;
-
-                // Call callback - if it returns false, stop generation
-                if !callback(next, &token_text) {
-                    break;
+            // DEBUG: show kv cache lengths after forward
+            if std::env::var("DEBUG_KV").is_ok() {
+                eprintln!("  After forward: pos={}, cache_position={}", pos, cache_position);
+                for (li, cache) in self.kv_caches.iter().enumerate() {
+                    eprintln!("  KV layer {} current_seq_len={}", li, cache.current_seq_len);
                 }
             }
 
+            // Get logits for next iteration
+            last_logits = logits[(logits.len() - self.config.vocab_size)..].to_vec();
+
+            // Decode just this token and call callback
+            let token_text = tokenizer.decode(&[next], true)?;
+
+            // Call callback - if it returns false, stop generation
+            if !callback(next, &token_text) {
+                break;
+            }
+
             pos += 1;
-            token = next;
         }
 
         // Return full generated text

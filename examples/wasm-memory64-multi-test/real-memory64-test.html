@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Real Memory64 WASM Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        button { margin: 5px; padding: 10px; background: #007cba; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #005a87; }
+        pre { background: #f8f8f8; padding: 10px; border-radius: 3px; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Real Memory64 WASM Test</h1>
+    
+    <div class="test">
+        <h2>Real WASM Memory64 Support</h2>
+        <button onclick="testRealMemory64Support()">Test Real Memory64 Support</button>
+        <button onclick="detectRealWasmFeatures()">Detect Real WASM Features</button>
+        <pre id="support-result"></pre>
+    </div>
+
+    <div class="test">
+        <h2>Real WASM Memory Allocation</h2>
+        <button onclick="testRealWasmAllocation(100)">Allocate 100 MB</button>
+        <button onclick="testRealWasmAllocation(1000)">Allocate 1 GB</button>
+        <button onclick="testRealWasmAllocation(2000)">Allocate 2 GB</button>
+        <button onclick="testRealWasmAllocation(4000)">Allocate 4 GB</button>
+        <button onclick="testRealWasmAllocation(5000)">Allocate 5 GB</button>
+        <button onclick="testRealWasmAllocation(8000)">Allocate 8 GB</button>
+        <pre id="allocation-result"></pre>
+    </div>
+
+    <div class="test">
+        <h2>Find Real Memory Limit</h2>
+        <button onclick="findRealMemoryLimit()">Find Real Memory Limit</button>
+        <button onclick="getRealMemoryStats()">Get Real Memory Stats</button>
+        <pre id="limit-result"></pre>
+    </div>
+
+    <div class="test">
+        <h2>Multi-Memory Simulation</h2>
+        <button onclick="testMultiMemorySimulation()">Test Multi-Memory Simulation</button>
+        <pre id="multi-memory-result"></pre>
+    </div>
+
+    <script type="module">
+        import init, { 
+            WasmMemoryTest,
+            test_memory64_support, 
+            detect_wasm_features 
+        } from './pkg-real-memory64/wasm_memory64_multi_test.js';
+
+        let wasmTest;
+        let wasmInitialized = false;
+
+        async function initWasm() {
+            try {
+                console.log('🔄 Initializing Real Memory64 WASM module...');
+                await init();
+                wasmTest = new WasmMemoryTest();
+                wasmInitialized = true;
+                console.log('✅ Real Memory64 WASM module loaded successfully');
+                document.getElementById('support-result').textContent = '✅ Real Memory64 WASM module loaded successfully';
+            } catch (error) {
+                console.error('❌ Failed to load Real Memory64 WASM module:', error);
+                document.getElementById('support-result').textContent = '❌ Failed to load Real Memory64 WASM module: ' + error;
+            }
+        }
+
+        window.testRealMemory64Support = function() {
+            if (!wasmInitialized) {
+                document.getElementById('support-result').textContent = '❌ WASM not initialized';
+                return;
+            }
+            
+            try {
+                const support = test_memory64_support();
+                document.getElementById('support-result').textContent = support;
+            } catch (error) {
+                document.getElementById('support-result').textContent = '❌ Error: ' + error;
+            }
+        };
+
+        window.detectRealWasmFeatures = function() {
+            if (!wasmInitialized) {
+                document.getElementById('support-result').textContent = '❌ WASM not initialized';
+                return;
+            }
+            
+            try {
+                const features = detect_wasm_features();
+                document.getElementById('support-result').textContent = features;
+            } catch (error) {
+                document.getElementById('support-result').textContent = '❌ Error: ' + error;
+            }
+        };
+
+        window.testRealWasmAllocation = function(sizeMB) {
+            if (!wasmInitialized) {
+                document.getElementById('allocation-result').textContent = '❌ WASM not initialized';
+                return;
+            }
+            
+            try {
+                const result = wasmTest.test_real_memory64_allocation(sizeMB);
+                document.getElementById('allocation-result').textContent = result;
+            } catch (error) {
+                document.getElementById('allocation-result').textContent = '❌ Error: ' + error;
+            }
+        };
+
+        window.findRealMemoryLimit = function() {
+            if (!wasmInitialized) {
+                document.getElementById('limit-result').textContent = '❌ WASM not initialized';
+                return;
+            }
+            
+            try {
+                const result = wasmTest.find_real_memory_limit();
+                document.getElementById('limit-result').textContent = result;
+            } catch (error) {
+                document.getElementById('limit-result').textContent = '❌ Error: ' + error;
+            }
+        };
+
+        window.getRealMemoryStats = function() {
+            if (!wasmInitialized) {
+                document.getElementById('limit-result').textContent = '❌ WASM not initialized';
+                return;
+            }
+            
+            try {
+                const stats = wasmTest.get_real_memory_stats();
+                document.getElementById('limit-result').textContent = stats;
+            } catch (error) {
+                document.getElementById('limit-result').textContent = '❌ Error: ' + error;
+            }
+        };
+
+        window.testMultiMemorySimulation = function() {
+            if (!wasmInitialized) {
+                document.getElementById('multi-memory-result').textContent = '❌ WASM not initialized';
+                return;
+            }
+            
+            try {
+                const result = wasmTest.test_multi_memory_simulation();
+                document.getElementById('multi-memory-result').textContent = result;
+            } catch (error) {
+                document.getElementById('multi-memory-result').textContent = '❌ Error: ' + error;
+            }
+        };
+
+        // Initialize WASM when page loads
+        initWasm();
+    </script>
+</body>
+</html>

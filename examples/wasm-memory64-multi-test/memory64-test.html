@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Memory64 Allocation Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        button { margin: 5px; padding: 10px; background: #007cba; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #005a87; }
+        pre { background: #f8f8f8; padding: 10px; border-radius: 3px; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Memory64 Allocation Test</h1>
+    
+    <div class="test">
+        <h2>Memory64 Support Check</h2>
+        <button onclick="checkMemory64()">Check Memory64 Support</button>
+        <pre id="support"></pre>
+    </div>
+
+    <div class="test">
+        <h2>Memory64 Allocation (>4GB)</h2>
+        <button onclick="testMemory64(5000)">Allocate 5 GB</button>
+        <button onclick="testMemory64(8000)">Allocate 8 GB</button>
+        <button onclick="testMemory64(10000)">Allocate 10 GB</button>
+        <pre id="memory64"></pre>
+    </div>
+
+    <div class="test">
+        <h2>Standard Allocation (<4GB)</h2>
+        <button onclick="testStandard(1000)">Allocate 1 GB</button>
+        <button onclick="testStandard(2000)">Allocate 2 GB</button>
+        <button onclick="testStandard(3000)">Allocate 3 GB</button>
+        <button onclick="testStandard(4000)">Allocate 4 GB</button>
+        <pre id="standard"></pre>
+    </div>
+
+    <script type="module">
+        import init, { 
+            test_memory64_support,
+            WasmMemoryTest
+        } from './pkg-memory64/wasm_memory64_multi_test.js';
+
+        let wasmTest;
+
+        async function loadWasm() {
+            try {
+                console.log('Loading Memory64 WASM...');
+                await init();
+                wasmTest = new WasmMemoryTest();
+                console.log('✅ Memory64 WASM loaded successfully');
+                document.getElementById('support').textContent = '✅ Memory64 WASM loaded successfully';
+            } catch (error) {
+                console.error('❌ Memory64 WASM load failed:', error);
+                document.getElementById('support').textContent = '❌ Memory64 WASM load failed: ' + error;
+            }
+        }
+
+        window.checkMemory64 = function() {
+            if (!wasmTest) {
+                document.getElementById('support').textContent = '❌ WASM not loaded';
+                return;
+            }
+            
+            try {
+                const support = test_memory64_support();
+                document.getElementById('support').textContent = support;
+            } catch (error) {
+                document.getElementById('support').textContent = '❌ Error: ' + error;
+            }
+        };
+
+        window.testMemory64 = function(sizeMB) {
+            if (!wasmTest) {
+                document.getElementById('memory64').textContent = '❌ WASM not loaded';
+                return;
+            }
+            
+            try {
+                const result = wasmTest.test_memory64_allocation(sizeMB);
+                document.getElementById('memory64').textContent = result;
+            } catch (error) {
+                document.getElementById('memory64').textContent = '❌ Error: ' + error;
+            }
+        };
+
+        window.testStandard = function(sizeMB) {
+            if (!wasmTest) {
+                document.getElementById('standard').textContent = '❌ WASM not loaded';
+                return;
+            }
+            
+            try {
+                const result = wasmTest.test_basic_allocation(sizeMB);
+                document.getElementById('standard').textContent = result;
+            } catch (error) {
+                document.getElementById('standard').textContent = '❌ Error: ' + error;
+            }
+        };
+
+        // Load WASM on page load
+        loadWasm();
+    </script>
+</body>
+</html>

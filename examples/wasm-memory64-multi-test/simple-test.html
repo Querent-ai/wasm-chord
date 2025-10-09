@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Memory64 Test - Simple</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        button { margin: 5px; padding: 10px; background: #007cba; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #005a87; }
+        pre { background: #f8f8f8; padding: 10px; border-radius: 3px; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Simple Memory64 Test</h1>
+    
+    <div class="test">
+        <h2>Feature Detection</h2>
+        <button onclick="testFeatures()">Test Features</button>
+        <pre id="features"></pre>
+    </div>
+
+    <div class="test">
+        <h2>Memory Allocation</h2>
+        <button onclick="testAllocation(100)">Allocate 100 MB</button>
+        <button onclick="testAllocation(1000)">Allocate 1 GB</button>
+        <button onclick="testAllocation(5000)">Allocate 5 GB</button>
+        <pre id="allocation"></pre>
+    </div>
+
+    <script type="module">
+        import init, { 
+            test_memory64_support, 
+            test_multi_memory_support, 
+            detect_wasm_features,
+            WasmMemoryTest
+        } from './pkg/wasm_memory64_multi_test.js';
+
+        let wasmTest;
+
+        async function loadWasm() {
+            try {
+                console.log('Loading WASM...');
+                await init();
+                wasmTest = new WasmMemoryTest();
+                console.log('✅ WASM loaded successfully');
+                document.getElementById('features').textContent = '✅ WASM loaded successfully';
+            } catch (error) {
+                console.error('❌ WASM load failed:', error);
+                document.getElementById('features').textContent = '❌ WASM load failed: ' + error;
+            }
+        }
+
+        window.testFeatures = function() {
+            if (!wasmTest) {
+                document.getElementById('features').textContent = '❌ WASM not loaded';
+                return;
+            }
+            
+            try {
+                const features = detect_wasm_features();
+                const memory64 = test_memory64_support();
+                const multiMemory = test_multi_memory_support();
+                
+                const result = `Features:\n${features}\n\nMemory64:\n${memory64}\n\nMulti-Memory:\n${multiMemory}`;
+                document.getElementById('features').textContent = result;
+            } catch (error) {
+                document.getElementById('features').textContent = '❌ Error: ' + error;
+            }
+        };
+
+        window.testAllocation = function(sizeMB) {
+            if (!wasmTest) {
+                document.getElementById('allocation').textContent = '❌ WASM not loaded';
+                return;
+            }
+            
+            try {
+                const result = wasmTest.test_basic_allocation(sizeMB);
+                document.getElementById('allocation').textContent = result;
+            } catch (error) {
+                document.getElementById('allocation').textContent = '❌ Error: ' + error;
+            }
+        };
+
+        // Load WASM on page load
+        loadWasm();
+    </script>
+</body>
+</html>

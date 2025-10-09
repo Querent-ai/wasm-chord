@@ -5,7 +5,7 @@ use wasm_chord_core::error::{Error, Result};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
-use web_sys::{IdbDatabase, IdbOpenDbRequest, IdbRequest};
+use web_sys;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;

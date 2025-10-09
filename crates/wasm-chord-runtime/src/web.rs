@@ -167,9 +167,8 @@ impl AsyncTokenStream {
         }
     }
 
-    /// Symbol.asyncIterator support
-    #[wasm_bindgen(js_name = "Symbol.asyncIterator")]
-    pub fn symbol_async_iterator(&self) -> AsyncTokenStream {
+    /// Get async iterator (simplified version)
+    pub fn get_async_iterator(&self) -> AsyncTokenStream {
         AsyncTokenStream {
             prompt: self.prompt.clone(),
             config: self.config.clone(),

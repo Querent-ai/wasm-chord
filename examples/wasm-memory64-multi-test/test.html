@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebAssembly Memory64 & Multi-Memory Test</title>
+    <style>
+        body { font-family: monospace; margin: 20px; background: #f5f5f5; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; background: white; border-radius: 5px; }
+        .success { color: green; font-weight: bold; }
+        .error { color: red; font-weight: bold; }
+        .info { color: blue; }
+        button { margin: 5px; padding: 10px; background: #007cba; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #005a87; }
+        pre { background: #f8f8f8; padding: 10px; overflow-x: auto; border: 1px solid #ddd; border-radius: 3px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 3px; }
+        .status.success { background: #d4edda; border: 1px solid #c3e6cb; }
+        .status.error { background: #f8d7da; border: 1px solid #f5c6cb; }
+        .status.info { background: #d1ecf1; border: 1px solid #bee5eb; }
+    </style>
+</head>
+<body>
+    <h1>🧪 WebAssembly Memory64 & Multi-Memory Test</h1>
+    
+    <div class="test-section">
+        <h2>📝 Feature Detection</h2>
+        <button onclick="testFeatures()">Detect WASM Features</button>
+        <button onclick="testMemory64Support()">Test Memory64 Support</button>
+        <button onclick="testMultiMemorySupport()">Test Multi-Memory Support</button>
+        <div id="features-status" class="status info">Click buttons above to test features</div>
+        <pre id="features-output"></pre>
+    </div>
+
+    <div class="test-section">
+        <h2>📝 Basic Memory Allocation</h2>
+        <button onclick="testBasicAllocation(1)">Allocate 1 MB</button>
+        <button onclick="testBasicAllocation(10)">Allocate 10 MB</button>
+        <button onclick="testBasicAllocation(100)">Allocate 100 MB</button>
+        <button onclick="testBasicAllocation(1000)">Allocate 1 GB</button>
+        <button onclick="testBasicAllocation(2000)">Allocate 2 GB</button>
+        <button onclick="testBasicAllocation(3000)">Allocate 3 GB</button>
+        <button onclick="testBasicAllocation(4000)">Allocate 4 GB</button>
+        <button onclick="testBasicAllocation(5000)">Allocate 5 GB</button>
+        <div id="basic-status" class="status info">Click buttons above to test basic allocation</div>
+        <pre id="basic-output"></pre>
+    </div>
+
+    <div class="test-section">
+        <h2>📝 Memory64 Allocation (>4GB)</h2>
+        <button onclick="testMemory64Allocation(5000)">Allocate 5 GB</button>
+        <button onclick="testMemory64Allocation(8000)">Allocate 8 GB</button>
+        <button onclick="testMemory64Allocation(10000)">Allocate 10 GB</button>
+        <div id="memory64-status" class="status info">Click buttons above to test Memory64 allocation</div>
+        <pre id="memory64-output"></pre>
+    </div>
+
+    <div class="test-section">
+        <h2>📝 Multi-Memory Allocation</h2>
+        <button onclick="testMultiMemory('weights', 100)">Weights: 100 MB</button>
+        <button onclick="testMultiMemory('activations', 50)">Activations: 50 MB</button>
+        <button onclick="testMultiMemory('kv_cache', 200)">KV Cache: 200 MB</button>
+        <button onclick="testMultiMemory('embeddings', 75)">Embeddings: 75 MB</button>
+        <div id="multi-memory-status" class="status info">Click buttons above to test multi-memory allocation</div>
+        <pre id="multi-memory-output"></pre>
+    </div>
+
+    <div class="test-section">
+        <h2>📝 Stress Test</h2>
+        <button onclick="runStressTest()">Run Progressive Stress Test</button>
+        <button onclick="testWasmMemoryGrow()">Test WASM Memory.grow()</button>
+        <button onclick="getMemoryStats()">Get Memory Stats</button>
+        <div id="stress-status" class="status info">Click buttons above to run stress tests</div>
+        <pre id="stress-output"></pre>
+    </div>
+
+    <script type="module">
+        import init, { 
+            WasmMemoryTest, 
+            test_memory64_support, 
+            test_multi_memory_support, 
+            detect_wasm_features 
+        } from './pkg/wasm_memory64_multi_test.js';
+
+        let wasmTest;
+        let wasmInitialized = false;
+
+        async function initWasm() {
+            try {
+                console.log('🔄 Initializing WebAssembly module...');
+                await init();
+                wasmTest = new WasmMemoryTest();
+                wasmInitialized = true;
+                console.log('✅ WebAssembly module loaded successfully');
+                updateStatus('features-status', 'success', '✅ WebAssembly module loaded successfully');
+            } catch (error) {
+                console.error('❌ Failed to load WebAssembly module:', error);
+                updateStatus('features-status', 'error', '❌ Failed to load WebAssembly module: ' + error);
+            }
+        }
+
+        function updateStatus(elementId, type, message) {
+            const element = document.getElementById(elementId);
+            element.className = `status ${type}`;
+            element.textContent = message;
+        }
+
+        function updateOutput(elementId, content) {
+            document.getElementById(elementId).textContent = content;
+        }
+
+        window.testFeatures = function() {
+            if (!wasmInitialized) {
+                updateOutput('features-output', '❌ WebAssembly not initialized');
+                return;
+            }
+            try {
+                const features = detect_wasm_features();
+                updateOutput('features-output', features);
+                updateStatus('features-status', 'success', '✅ Features detected successfully');
+            } catch (error) {
+                updateOutput('features-output', '❌ Error: ' + error);
+                updateStatus('features-status', 'error', '❌ Error detecting features');
+            }
+        };
+
+        window.testMemory64Support = function() {
+            if (!wasmInitialized) {
+                updateOutput('features-output', '❌ WebAssembly not initialized');
+                return;
+            }
+            try {
+                const support = test_memory64_support();
+                updateOutput('features-output', support);
+                updateStatus('features-status', 'success', '✅ Memory64 support checked');
+            } catch (error) {
+                updateOutput('features-output', '❌ Error: ' + error);
+                updateStatus('features-status', 'error', '❌ Error checking Memory64 support');
+            }
+        };
+
+        window.testMultiMemorySupport = function() {
+            if (!wasmInitialized) {
+                updateOutput('features-output', '❌ WebAssembly not initialized');
+                return;
+            }
+            try {
+                const support = test_multi_memory_support();
+                updateOutput('features-output', support);
+                updateStatus('features-status', 'success', '✅ Multi-memory support checked');
+            } catch (error) {
+                updateOutput('features-output', '❌ Error: ' + error);
+                updateStatus('features-status', 'error', '❌ Error checking multi-memory support');
+            }
+        };
+
+        window.testBasicAllocation = function(sizeMB) {
+            if (!wasmInitialized) {
+                updateOutput('basic-output', '❌ WebAssembly not initialized');
+                return;
+            }
+            try {
+                updateStatus('basic-status', 'info', `🔄 Testing ${sizeMB} MB allocation...`);
+                const result = wasmTest.test_basic_allocation(sizeMB);
+                updateOutput('basic-output', result);
+                updateStatus('basic-status', 'success', `✅ ${sizeMB} MB allocation test completed`);
+            } catch (error) {
+                updateOutput('basic-output', '❌ Error: ' + error);
+                updateStatus('basic-status', 'error', `❌ ${sizeMB} MB allocation failed`);
+            }
+        };
+
+        window.testMemory64Allocation = function(sizeMB) {
+            if (!wasmInitialized) {
+                updateOutput('memory64-output', '❌ WebAssembly not initialized');
+                return;
+            }
+            try {
+                updateStatus('memory64-status', 'info', `🔄 Testing Memory64 ${sizeMB} MB allocation...`);
+                const result = wasmTest.test_memory64_allocation(sizeMB);
+                updateOutput('memory64-output', result);
+                updateStatus('memory64-status', 'success', `✅ Memory64 ${sizeMB} MB allocation test completed`);
+            } catch (error) {
+                updateOutput('memory64-output', '❌ Error: ' + error);
+                updateStatus('memory64-status', 'error', `❌ Memory64 ${sizeMB} MB allocation failed`);
+            }
+        };
+
+        window.testMultiMemory = function(region, sizeMB) {
+            if (!wasmInitialized) {
+                updateOutput('multi-memory-output', '❌ WebAssembly not initialized');
+                return;
+            }
+            try {
+                updateStatus('multi-memory-status', 'info', `🔄 Testing ${region} region ${sizeMB} MB allocation...`);
+                const result = wasmTest.test_multi_memory_allocation(region, sizeMB);
+                updateOutput('multi-memory-output', result);
+                updateStatus('multi-memory-status', 'success', `✅ ${region} region ${sizeMB} MB allocation completed`);
+            } catch (error) {
+                updateOutput('multi-memory-output', '❌ Error: ' + error);
+                updateStatus('multi-memory-status', 'error', `❌ ${region} region ${sizeMB} MB allocation failed`);
+            }
+        };
+
+        window.runStressTest = function() {
+            if (!wasmInitialized) {
+                updateOutput('stress-output', '❌ WebAssembly not initialized');
+                return;
+            }
+            try {
+                updateStatus('stress-status', 'info', '🔄 Running stress test...');
+                const result = wasmTest.stress_test();
+                updateOutput('stress-output', result);
+                updateStatus('stress-status', 'success', '✅ Stress test completed');
+            } catch (error) {
+                updateOutput('stress-output', '❌ Error: ' + error);
+                updateStatus('stress-status', 'error', '❌ Stress test failed');
+            }
+        };
+
+        window.testWasmMemoryGrow = function() {
+            if (!wasmInitialized) {
+                updateOutput('stress-output', '❌ WebAssembly not initialized');
+                return;
+            }
+            try {
+                updateStatus('stress-status', 'info', '🔄 Testing WASM memory.grow()...');
+                const result = wasmTest.test_wasm_memory_grow();
+                updateOutput('stress-output', result);
+                updateStatus('stress-status', 'success', '✅ WASM memory.grow() test completed');
+            } catch (error) {
+                updateOutput('stress-output', '❌ Error: ' + error);
+                updateStatus('stress-status', 'error', '❌ WASM memory.grow() test failed');
+            }
+        };
+
+        window.getMemoryStats = function() {
+            if (!wasmInitialized) {
+                updateOutput('stress-output', '❌ WebAssembly not initialized');
+                return;
+            }
+            try {
+                updateStatus('stress-status', 'info', '🔄 Getting memory stats...');
+                const stats = wasmTest.get_memory_stats();
+                updateOutput('stress-output', stats);
+                updateStatus('stress-status', 'success', '✅ Memory stats retrieved');
+            } catch (error) {
+                updateOutput('stress-output', '❌ Error: ' + error);
+                updateStatus('stress-status', 'error', '❌ Failed to get memory stats');
+            }
+        };
+
+        // Initialize WASM when page loads
+        initWasm();
+    </script>
+</body>
+</html>

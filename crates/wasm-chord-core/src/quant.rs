@@ -79,42 +79,36 @@ pub fn dequantize_q4_k(block: &BlockQ4_K, output: &mut [f32]) -> Result<()> {
         }
     }
 
-    // Process 256 elements in groups of 64
-    // Each group uses 2 scales (one for lower nibbles, one for upper)
-    let mut y_idx = 0;
-    let mut q_idx = 0;
-    let mut is = 0; // scale index
+    // Process 256 elements in 4 groups of 64
+    for i in 0..4 {
+        let is = i * 2; // Scale index
 
-    for _ in 0..4 {
-        // Get scales for lower and upper nibbles
-        let (sc0, m0) = get_scale_min_k4(is, &block.scales);
-        let (sc1, m1) = get_scale_min_k4(is + 1, &block.scales);
+        // Get scales for this group
+        let (sc, m) = get_scale_min_k4(is, &block.scales);
+        let d1 = d * sc as f32;
+        let m1 = min * m as f32;
 
-        // llama.cpp does: d1 = d * sc, m1 = min * m
-        // The d and min values are already in the correct scale
-        let d1 = d * sc0 as f32;
-        let m1_val = min * m0 as f32;
-        let d2 = d * sc1 as f32;
-        let m2 = min * m1 as f32;
+        let (sc, m) = get_scale_min_k4(is + 1, &block.scales);
+        let d2 = d * sc as f32;
+        let m2 = min * m as f32;
 
-        // Dequantize 32 lower nibbles
-        for _ in 0..32 {
-            let q = block.qs[q_idx];
-            output[y_idx] = d1 * (q & 0xF) as f32 - m1_val; // SUBTRACT min (matches llama.cpp)
-            y_idx += 1;
-            q_idx += 1;
+        // Process 64 values: 32 from lower nibbles, 32 from upper nibbles
+        let q_offset = i * 32;
+        let y_offset = i * 64;
+
+        // Lower nibbles (32 values)
+        for j in 0..32 {
+            let q = block.qs[q_offset + j];
+            let x = (q & 0xF) as f32;
+            output[y_offset + j] = d1 * x - m1;
         }
 
-        // Dequantize 32 upper nibbles (from same bytes)
-        q_idx -= 32; // Go back to same bytes
-        for _ in 0..32 {
-            let q = block.qs[q_idx];
-            output[y_idx] = d2 * (q >> 4) as f32 - m2; // SUBTRACT min (matches llama.cpp)
-            y_idx += 1;
-            q_idx += 1;
+        // Upper nibbles (32 values)
+        for j in 0..32 {
+            let q = block.qs[q_offset + j];
+            let x = (q >> 4) as f32;
+            output[y_offset + 32 + j] = d2 * x - m2;
         }
-
-        is += 2;
     }
 
     Ok(())

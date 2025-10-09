@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Test 1: Can we allocate 10GB?
     println!("📝 Test 1: 10GB Allocation Check");
 
-    let mut allocator = MemoryAllocator::new(MemoryConfig::default());
+    let allocator = MemoryAllocator::new(MemoryConfig::default());
     let size_10gb = 10 * 1024 * 1024 * 1024;
 
     let can_allocate = allocator.can_allocate(size_10gb);
@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Test 2: Progressive Allocation (1GB steps)
     println!("📝 Test 2: Progressive Allocation");
 
-    let mut allocator = MemoryAllocator::new(MemoryConfig::default());
+    let allocator = MemoryAllocator::new(MemoryConfig::default());
     let size_1gb = 1024 * 1024 * 1024;
 
     let test_sizes = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];

@@ -1,5 +1,4 @@
-use wasm_chord_core::{GGUFParser, TensorLoader, Tokenizer};
-use wasm_chord_runtime::Model;
+use wasm_chord_core::{GGUFParser, Tokenizer};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔍 Tokenizer ↔ Model Vocab Alignment Check");

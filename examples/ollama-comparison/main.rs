@@ -1,7 +1,7 @@
 /// Direct comparison with Ollama TinyLlama
 /// This loads the exact same model and compares first token generation
 use std::fs::File;
-use std::io::{BufReader, Seek};
+use std::io::BufReader;
 use wasm_chord_core::{GGUFParser, TensorLoader, Tokenizer};
 use wasm_chord_runtime::{Model, TransformerConfig};
 
@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let prompt = "Hello";
     println!("🔍 Encoding prompt: {:?}", prompt);
 
-    let tokens = tokenizer.encode(prompt, false)?;
+    let tokens = tokenizer.encode(prompt, true)?; // Add BOS token!
     println!("✅ Tokens for '{}': {:?}", prompt, tokens);
 
     // Check what token ID 15043 maps to (expected from Ollama)
@@ -139,6 +139,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("there", vec!["there", "▁there"]),
         (" there", vec!["▁there"]),
         ("!", vec!["!"]),
+        ("Yes", vec!["Yes", "▁Yes"]), // Added Yes token for debugging
+        ("Howdy", vec!["Howdy", "▁Howdy"]), // Added Howdy token for debugging
+        ("Hi", vec!["Hi", "▁Hi"]),    // Added Hi token for debugging
     ];
 
     println!("\n🔍 Checking specific expected tokens:");

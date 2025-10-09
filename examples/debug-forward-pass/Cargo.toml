@@ -1,0 +1,13 @@
+[package]
+name = "debug-forward-pass"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wasm-chord-core = { workspace = true }
+wasm-chord-runtime = { workspace = true }
+half = { workspace = true }
+
+[[bin]]
+name = "debug-forward-pass"
+path = "../debug-forward-pass.rs"

@@ -1,9 +1,3 @@
-/// GPU-Accelerated Generation Test
-/// Tests end-to-end text generation with GPU acceleration
-use std::fs::File;
-use std::io::BufReader;
-use wasm_chord_core::{GGUFParser, TensorLoader, Tokenizer};
-use wasm_chord_runtime::{GenerationConfig, Model, TransformerConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🎮 GPU-Accelerated Generation Test");

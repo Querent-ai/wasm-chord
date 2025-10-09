@@ -22,9 +22,9 @@ impl Default for MemoryConfig {
 
             // 4GB limit for 32-bit, 16GB for 64-bit
             #[cfg(feature = "memory64")]
-            max_memory_bytes: 16 * 1024 * 1024 * 1024, // 16GB
+            max_memory_bytes: (16_u64 * 1024 * 1024 * 1024) as usize, // 16GB
             #[cfg(not(feature = "memory64"))]
-            max_memory_bytes: 4 * 1024 * 1024 * 1024, // 4GB
+            max_memory_bytes: (4_u64 * 1024 * 1024 * 1024) as usize, // 4GB
 
             initial_memory_bytes: 1024 * 1024 * 1024, // 1GB
         }
@@ -190,7 +190,7 @@ mod tests {
     #[test]
     fn test_requires_memory64() {
         // Small model doesn't need Memory64
-        assert!(!requires_memory64(1 * 1024 * 1024 * 1024)); // 1GB
+        assert!(!requires_memory64(1024 * 1024 * 1024)); // 1GB
 
         // Large model needs Memory64
         assert!(requires_memory64(4 * 1024 * 1024 * 1024)); // 4GB

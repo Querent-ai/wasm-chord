@@ -76,7 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let chat_prompt = template.format(&conversation)?;
 
     let config = GenerationConfig {
-        max_tokens: 10,
+        max_tokens: 1,    // Just generate 1 token to test
         temperature: 0.0, // Deterministic/greedy
         top_p: 0.9,
         top_k: 40,

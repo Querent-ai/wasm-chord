@@ -1,4 +1,3 @@
-use wasm_chord_cpu::gemm::matmul_f32;
 /// Kernel Verification: Compare with llama.cpp outputs
 /// This creates a minimal test that can be compared with llama.cpp's first token generation
 use wasm_chord_cpu::kernels::softmax;

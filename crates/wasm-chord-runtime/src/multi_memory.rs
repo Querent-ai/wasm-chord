@@ -86,15 +86,15 @@ impl MultiMemoryLayout {
         let regions = vec![
             MemoryRegionData::new(MemoryRegionConfig::new(
                 MemoryRegion::Weights,
-                2 * 1024 * 1024 * 1024, // 2GB initial
-                8 * 1024 * 1024 * 1024, // 8GB max
-                false,                  // not growable (static)
+                2 * 1024 * 1024 * 1024,                // 2GB initial
+                (8_u64 * 1024 * 1024 * 1024) as usize, // 8GB max
+                false,                                 // not growable (static)
             )),
             MemoryRegionData::new(MemoryRegionConfig::new(
                 MemoryRegion::Activations,
-                512 * 1024 * 1024,      // 512MB initial
-                4 * 1024 * 1024 * 1024, // 4GB max
-                true,                   // growable
+                512 * 1024 * 1024,                     // 512MB initial
+                (4_u64 * 1024 * 1024 * 1024) as usize, // 4GB max
+                true,                                  // growable
             )),
             MemoryRegionData::new(MemoryRegionConfig::new(
                 MemoryRegion::KVCache,
@@ -117,6 +117,11 @@ impl MultiMemoryLayout {
     pub fn with_configs(configs: Vec<MemoryRegionConfig>) -> Self {
         let regions = configs.into_iter().map(MemoryRegionData::new).collect();
         Self { regions }
+    }
+
+    /// Get the number of memory regions
+    pub fn region_count(&self) -> usize {
+        self.regions.len()
     }
 
     /// Get region index
