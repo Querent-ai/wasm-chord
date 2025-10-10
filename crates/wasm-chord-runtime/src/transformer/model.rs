@@ -4,7 +4,10 @@ use rand::distributions::{Distribution, WeightedIndex};
 use rand::thread_rng;
 use wasm_chord_core::error::Result;
 use wasm_chord_core::Tokenizer;
-use wasm_chord_cpu::{matmul_f32_candle, matmul_transposed_candle, CandleTensorBackend};
+use wasm_chord_cpu::{
+    candle_gpu_backend::CandleGpuBackend, matmul_f32_candle, matmul_transposed_candle,
+    CandleTensorBackend,
+};
 
 #[cfg(feature = "gpu")]
 use wasm_chord_gpu::GpuBackend;
@@ -31,6 +34,8 @@ pub struct Model {
     gpu: Option<GpuBackend>,
     /// Candle tensor backend for optimized operations
     candle_backend: CandleTensorBackend,
+    /// GPU backend for accelerated operations (optional)
+    gpu_backend: Option<CandleGpuBackend>,
 }
 
 /// Transpose a matrix stored in row-major order
@@ -195,6 +200,7 @@ impl Model {
             #[cfg(feature = "gpu")]
             gpu: None,
             candle_backend: CandleTensorBackend::new(),
+            gpu_backend: CandleGpuBackend::new().ok(),
         }
     }
 
@@ -219,6 +225,22 @@ impl Model {
         }
     }
 
+    /// Initialize Candle GPU backend
+    pub fn init_candle_gpu(&mut self) -> Result<()> {
+        match CandleGpuBackend::new() {
+            Ok(gpu_backend) => {
+                println!("🚀 Candle GPU backend initialized successfully");
+                self.gpu_backend = Some(gpu_backend);
+                Ok(())
+            }
+            Err(e) => {
+                println!("⚠️  Candle GPU initialization failed: {}, falling back to CPU", e);
+                self.gpu_backend = None;
+                Ok(()) // Fall back to CPU
+            }
+        }
+    }
+
     /// Matrix multiplication with GPU/CPU fallback
     ///
     /// Tries GPU first (if enabled), falls back to CPU
@@ -234,6 +256,50 @@ impl Model {
         n: usize,
         transposed_b: bool,
     ) -> Result<Vec<f32>> {
+        // Try Candle GPU backend first
+        if let Some(ref gpu_backend) = self.gpu_backend {
+            // Convert inputs to tensors
+            let a_tensor = gpu_backend.f32_to_tensor(a, &[m, k]).map_err(|e| {
+                wasm_chord_core::error::Error::ParseError(format!(
+                    "GPU tensor creation failed: {}",
+                    e
+                ))
+            })?;
+            let b_tensor = gpu_backend
+                .f32_to_tensor(
+                    b,
+                    &[if transposed_b { n } else { k }, if transposed_b { k } else { n }],
+                )
+                .map_err(|e| {
+                    wasm_chord_core::error::Error::ParseError(format!(
+                        "GPU tensor creation failed: {}",
+                        e
+                    ))
+                })?;
+
+            // Perform matrix multiplication
+            let result_tensor = if transposed_b {
+                gpu_backend.matmul_transposed(&a_tensor, &b_tensor).map_err(|e| {
+                    wasm_chord_core::error::Error::ParseError(format!(
+                        "GPU matmul_transposed failed: {}",
+                        e
+                    ))
+                })?
+            } else {
+                gpu_backend.matmul(&a_tensor, &b_tensor).map_err(|e| {
+                    wasm_chord_core::error::Error::ParseError(format!("GPU matmul failed: {}", e))
+                })?
+            };
+
+            // Convert result back to f32 slice
+            return gpu_backend.tensor_to_f32(&result_tensor).map_err(|e| {
+                wasm_chord_core::error::Error::ParseError(format!(
+                    "GPU tensor conversion failed: {}",
+                    e
+                ))
+            });
+        }
+
         #[cfg(feature = "gpu")]
         if let Some(ref gpu) = self.gpu {
             // Try GPU matmul
@@ -268,10 +334,10 @@ impl Model {
     ) -> Result<()> {
         use wasm_chord_core::error::Error;
 
-        // Run focused debugging
-        eprintln!("🧪 Running focused debugging...");
-        super::focused_debug::run_focused_debugging()?;
-        eprintln!("✅ All focused debugging tests passed!");
+        // Run focused debugging (disabled for performance)
+        // eprintln!("🧪 Running focused debugging...");
+        // super::focused_debug::run_focused_debugging()?;
+        // eprintln!("✅ All focused debugging tests passed!");
 
         // Load token embeddings - try different tensor names
         let embedding_data = if let Ok(data) =
@@ -290,12 +356,12 @@ impl Model {
         };
 
         {
-            eprintln!("LOADED 'token_embd.weight' raw.len={}", embedding_data.len());
-            tensor_stats("token_embd.weight (raw)", embedding_data);
-            eprintln!(
-                "  Raw preview (first 20): {:?}",
-                &embedding_data[..20.min(embedding_data.len())]
-            );
+            // eprintln!("LOADED 'token_embd.weight' raw.len={}", embedding_data.len());
+            // tensor_stats("token_embd.weight (raw)", embedding_data);
+            // eprintln!(
+            //     "  Raw preview (first 20): {:?}",
+            //     &embedding_data[..20.min(embedding_data.len())]
+            // );
 
             println!(
                 "🔍 Loading token embeddings as-is: [vocab_size={}, hidden_size={}]",
@@ -305,22 +371,22 @@ impl Model {
             // Our embedding lookup (line 1342) correctly handles this format
             // by gathering row token_id from the matrix
             self.token_embeddings.copy_from_slice(embedding_data);
-            eprintln!(
-                "  Embeddings preview (first 20): {:?}",
-                &self.token_embeddings[..20.min(self.token_embeddings.len())]
-            );
-            tensor_stats("token_embd.weight (model)", &self.token_embeddings);
+            // eprintln!(
+            //     "  Embeddings preview (first 20): {:?}",
+            //     &self.token_embeddings[..20.min(self.token_embeddings.len())]
+            // );
+            // tensor_stats("token_embd.weight (model)", &self.token_embeddings);
         }
 
         // Load output norm
         if let Ok(norm_data) = tensor_loader.load_tensor("output_norm.weight", parser) {
-            eprintln!("LOADED 'output_norm.weight' raw.len={}", norm_data.len());
-            tensor_stats("output_norm.weight (raw)", norm_data);
+            // eprintln!("LOADED 'output_norm.weight' raw.len={}", norm_data.len());
+            // tensor_stats("output_norm.weight (raw)", norm_data);
 
             // Load raw weights without arbitrary scaling
             self.output_norm.copy_from_slice(norm_data);
 
-            tensor_stats("output_norm.weight (model)", &self.output_norm);
+            // tensor_stats("output_norm.weight (model)", &self.output_norm);
             println!("✅ Output norm loaded");
         } else {
             eprintln!("WARN: Failed to load output_norm.weight");
@@ -329,8 +395,8 @@ impl Model {
         // Load LM head - try different tensor names
         if let Ok(lm_head_data) = tensor_loader.load_tensor("output.weight", parser) {
             println!("✅ Found 'output.weight'");
-            eprintln!("LOADED 'output.weight' raw.len={}", lm_head_data.len());
-            tensor_stats("output.weight (raw)", lm_head_data);
+            // eprintln!("LOADED 'output.weight' raw.len={}", lm_head_data.len());
+            // tensor_stats("output.weight (raw)", lm_head_data);
 
             // DEBUG: Check raw bytes for token 29892 before dequantization
             if std::env::var("DEBUG_TRACE").is_ok() {
@@ -350,7 +416,7 @@ impl Model {
             // GGUF stores output.weight as [vocab_size, hidden_size]
             // Store as-is for matmul_transposed
             self.lm_head.copy_from_slice(lm_head_data);
-            tensor_stats("output.weight (model)", &self.lm_head);
+            // tensor_stats("output.weight (model)", &self.lm_head);
             println!(
                 "✅ LM head loaded (shape: [vocab_size={}, hidden_size={}]) for transposed matmul",
                 self.config.vocab_size, self.config.hidden_size
@@ -450,13 +516,13 @@ impl Model {
         }
 
         // Print LM head shape check
-        eprintln!(
-            "LM_HEAD len={}, expected={} (vocab_size * hidden_size={})",
-            self.lm_head.len(),
-            self.config.vocab_size * self.config.hidden_size,
-            self.config.vocab_size * self.config.hidden_size
-        );
-        eprintln!("token_embeddings.len()={}", self.token_embeddings.len());
+        // eprintln!(
+        //     "LM_HEAD len={}, expected={} (vocab_size * hidden_size={})",
+        //     self.lm_head.len(),
+        //     self.config.vocab_size * self.config.hidden_size,
+        //     self.config.vocab_size * self.config.hidden_size
+        // );
+        // eprintln!("token_embeddings.len()={}", self.token_embeddings.len());
 
         // Load each layer's weights
         for layer_idx in 0..self.config.num_layers {
@@ -495,8 +561,8 @@ impl Model {
                 // matmul_transposed will handle the orientation efficiently
                 layer.attention_weights.wq.copy_from_slice(wq);
                 if layer_idx == 0 {
-                    eprintln!("LOADED '{}' raw.len={}", wq_name, wq.len());
-                    tensor_stats(&format!("{} (model)", wq_name), &layer.attention_weights.wq);
+                    // eprintln!("LOADED '{}' raw.len={}", wq_name, wq.len());
+                    // tensor_stats(&format!("{} (model)", wq_name), &layer.attention_weights.wq);
                 }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wq_name);
@@ -506,8 +572,8 @@ impl Model {
                 // matmul_transposed will handle the orientation efficiently
                 layer.attention_weights.wk.copy_from_slice(wk);
                 if layer_idx == 0 {
-                    eprintln!("LOADED '{}' raw.len={}", wk_name, wk.len());
-                    tensor_stats(&format!("{} (model)", wk_name), &layer.attention_weights.wk);
+                    // eprintln!("LOADED '{}' raw.len={}", wk_name, wk.len());
+                    // tensor_stats(&format!("{} (model)", wk_name), &layer.attention_weights.wk);
                 }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wk_name);
@@ -517,20 +583,20 @@ impl Model {
                 // matmul_transposed will handle the orientation efficiently
                 layer.attention_weights.wv.copy_from_slice(wv);
                 if layer_idx == 0 {
-                    eprintln!("LOADED '{}' raw.len={}", wv_name, wv.len());
-                    tensor_stats(&format!("{} (model)", wv_name), &layer.attention_weights.wv);
+                    // eprintln!("LOADED '{}' raw.len={}", wv_name, wv.len());
+                    // tensor_stats(&format!("{} (model)", wv_name), &layer.attention_weights.wv);
                 }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wv_name);
             }
             if let Ok(wo) = tensor_loader.load_tensor(&wo_name, parser) {
                 if layer_idx == 0 {
-                    eprintln!("LOADED '{}' raw.len={}", wo_name, wo.len());
-                    tensor_stats(&format!("{} (raw)", wo_name), wo);
+                    // eprintln!("LOADED '{}' raw.len={}", wo_name, wo.len());
+                    // tensor_stats(&format!("{} (raw)", wo_name), wo);
                 }
                 layer.attention_weights.wo.copy_from_slice(wo);
                 if layer_idx == 0 {
-                    tensor_stats(&format!("{} (model)", wo_name), &layer.attention_weights.wo);
+                    // tensor_stats(&format!("{} (model)", wo_name), &layer.attention_weights.wo);
                 }
             } else if layer_idx == 0 {
                 eprintln!("WARN: Failed to load {}", wo_name);
@@ -538,26 +604,26 @@ impl Model {
 
             // Debug attention weight orientation for first layer after all weights are loaded
             if layer_idx == 0 {
-                eprintln!("🔍 Debugging attention weight orientation for layer 0...");
-                super::debug_weights::check_attention_weight_orientation(
-                    &layer.attention_weights.wq,
-                    &layer.attention_weights.wk,
-                    &layer.attention_weights.wv,
-                    &layer.attention_weights.wo,
-                    self.config.hidden_size,
-                )?;
+                // eprintln!("🔍 Debugging attention weight orientation for layer 0...");
+                // super::debug_weights::check_attention_weight_orientation(
+                //     &layer.attention_weights.wq,
+                //     &layer.attention_weights.wk,
+                //     &layer.attention_weights.wv,
+                //     &layer.attention_weights.wo,
+                //     self.config.hidden_size,
+                // )?;
 
                 // Check if we need to transpose weights
-                let wq_sum = layer.attention_weights.wq.iter().sum::<f32>();
-                let wq_mean = wq_sum / layer.attention_weights.wq.len() as f32;
-                let wq_variance =
-                    layer.attention_weights.wq.iter().map(|x| (x - wq_mean).powi(2)).sum::<f32>()
-                        / layer.attention_weights.wq.len() as f32;
+                // let wq_sum = layer.attention_weights.wq.iter().sum::<f32>();
+                // let wq_mean = wq_sum / layer.attention_weights.wq.len() as f32;
+                // let wq_variance =
+                //     layer.attention_weights.wq.iter().map(|x| (x - wq_mean).powi(2)).sum::<f32>()
+                //         / layer.attention_weights.wq.len() as f32;
 
-                eprintln!(
-                    "WQ stats: sum={:.6}, mean={:.6}, variance={:.6}",
-                    wq_sum, wq_mean, wq_variance
-                );
+                // eprintln!(
+                //     "WQ stats: sum={:.6}, mean={:.6}, variance={:.6}",
+                //     wq_sum, wq_mean, wq_variance
+                // );
 
                 // DISABLED: Variance check is fundamentally flawed
                 // Low variance doesn't indicate wrong orientation!
@@ -1155,10 +1221,6 @@ impl Model {
         // Encode prompt (with BOS token)
         let mut tokens = tokenizer.encode(prompt, true)?;
 
-        // DEBUG: Dump tokenization details
-        eprintln!("PROMPT_STR = {:?}", prompt);
-        eprintln!("TOKENS_ENCODED (len={}): {:?}", tokens.len(), tokens);
-
         if tokens.is_empty() {
             return Err(Error::ParseError("Empty token sequence".to_string()));
         }
@@ -1169,9 +1231,21 @@ impl Model {
             eprintln!("DEBUG: Starting generation with {} prompt tokens", num_prompt_tokens);
         }
 
-        // PREFILL PHASE: Process all prompt tokens at once
-        eprintln!("🔥 PREFILL: Processing {} prompt tokens at once", num_prompt_tokens);
-        let logits = self.forward(&tokens, 0)?;
+        // PREFILL PHASE: Process prompt tokens in chunks to avoid memory issues
+
+        // Process prompt tokens in chunks to avoid memory issues
+        let chunk_size = 8; // Increased from 1 to 8 for better performance
+        let mut prefill_logits = Vec::new();
+
+        for chunk_start in (0..num_prompt_tokens).step_by(chunk_size) {
+            let chunk_end = (chunk_start + chunk_size).min(num_prompt_tokens);
+            let chunk = &tokens[chunk_start..chunk_end];
+            let chunk_logits = self.forward(chunk, chunk_start)?;
+            prefill_logits.extend(chunk_logits);
+        }
+
+        // Get logits for the last prompt token
+        let logits = prefill_logits[(prefill_logits.len() - self.config.vocab_size)..].to_vec();
 
         // Get logits for the last prompt token (this is what we use to generate the first new token)
         let mut last_logits = logits.clone();
@@ -1179,8 +1253,6 @@ impl Model {
         // Sample first generated token
         let next = logits_processor.sample(&mut last_logits).map_err(Error::ParseError)?;
         tokens.push(next);
-
-        eprintln!("  Sampled first token: {}", next);
 
         // DECODE PHASE: Generate tokens one at a time
         let mut generated = 1;
@@ -1195,22 +1267,13 @@ impl Model {
                 tokens.len() - 1
             };
 
-            eprintln!(
-                "🔄 DECODE: Processing token {} at cache position {}",
-                last_token, cache_position
-            );
             last_logits = self.forward(&[last_token], cache_position)?;
 
             // Sample next token
             let next = logits_processor.sample(&mut last_logits).map_err(Error::ParseError)?;
 
-            // Show sampled token
-            let token_text = tokenizer.id_to_token(next).unwrap_or("<unknown>");
-            eprintln!("  Sampled: {} ({})", next, token_text);
-
             // Check for EOS token
             if next == tokenizer.special_tokens().eos_token_id {
-                eprintln!("  EOS token detected, stopping generation");
                 break;
             }
 
@@ -1218,8 +1281,6 @@ impl Model {
             tokens.push(next);
             generated += 1;
         }
-
-        eprintln!("✅ Generation complete: {} tokens generated", generated);
 
         // Decode all tokens to text (skip special tokens)
         let generated_text = tokenizer.decode(&tokens, true)?;

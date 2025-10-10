@@ -143,10 +143,10 @@ pub struct BlockQ5_K {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct BlockQ8_K {
-    pub quants: [i8; QK_K],      // 8-bit quantized values
-    pub scales: [u8; QK_K / 8],  // 32 scales per block (4 bits each)
-    pub d: u16,                  // f16 super-block scale (stored as u16)
-    pub dmin: u16,               // f16 super-block min scale (stored as u16)
+    pub quants: [i8; QK_K],     // 8-bit quantized values
+    pub scales: [u8; QK_K / 8], // 32 scales per block (4 bits each)
+    pub d: u16,                 // f16 super-block scale (stored as u16)
+    pub dmin: u16,              // f16 super-block min scale (stored as u16)
 }
 
 /// Dequantize Q4_0 block to f32
@@ -274,7 +274,7 @@ pub fn dequantize_q5_k(block: &BlockQ5_K, output: &mut [f32]) -> Result<()> {
     // Process 256 elements in 16 groups of 16
     for l in 0..16 {
         let is = l;
-        
+
         // Extract 16 values from the packed layout
         // Q5_K: 4 bits from ql + 1 bit from qh
         for k in 0..16 {
@@ -282,20 +282,20 @@ pub fn dequantize_q5_k(block: &BlockQ5_K, output: &mut [f32]) -> Result<()> {
             if ql_idx >= QK_K || ql_idx >= block.ql.len() {
                 break;
             }
-            
+
             let qh_idx = l * 2 + (k / 8);
             if qh_idx >= block.qh.len() {
                 break;
             }
-            
+
             let qh_bit = (k % 8) / 4; // Which bit in the qh byte
-            
+
             let ql_val = block.ql[ql_idx] as i8;
             let qh_val = (block.qh[qh_idx] >> (qh_bit * 4)) & 0xF;
-            
+
             // Combine 4 bits from ql with 1 bit from qh
             let quant_val = ql_val | ((qh_val as i8) << 4);
-            
+
             // Apply scale and write output
             output[ql_idx] = d * (block.scales[is] as f32) * (quant_val as f32);
         }
@@ -319,20 +319,16 @@ pub fn dequantize_q8_k(block: &BlockQ8_K, output: &mut [f32]) -> Result<()> {
     // Process 256 elements in 32 groups of 8
     for l in 0..32 {
         let is = l;
-        
+
         // Extract scale for this group (4 bits per scale)
         let scale_byte = block.scales[is / 2];
-        let scale_val = if is % 2 == 0 {
-            scale_byte & 0xF
-        } else {
-            scale_byte >> 4
-        };
-        
+        let scale_val = if is % 2 == 0 { scale_byte & 0xF } else { scale_byte >> 4 };
+
         // Process 8 values in this group
         for k in 0..8 {
             let idx = l * 8 + k;
             let quant_val = block.quants[idx] as f32;
-            
+
             // Apply scale and write output
             output[idx] = d * (scale_val as f32) * quant_val + min;
         }

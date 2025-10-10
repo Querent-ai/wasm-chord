@@ -35,7 +35,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ Model loaded successfully");
 
     // Test forward pass with BOS token
-    let test_tokens = vec![1u32]; // BOS token
     println!("\n🧪 Testing forward pass with BOS token (ID=1):");
 
     // Use generation instead of direct forward to see tokenization debugging

@@ -3,6 +3,7 @@
 //! Provides SIMD-accelerated kernels for tensor operations on CPU.
 
 pub mod candle_backend;
+pub mod candle_gpu_backend;
 pub mod candle_tensor_backend;
 pub mod fused;
 pub mod gemm;

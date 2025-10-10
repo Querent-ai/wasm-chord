@@ -4,9 +4,7 @@
 
 mod attention;
 mod config;
-mod debug_weights;
 mod ffn;
-mod focused_debug;
 mod kv_cache;
 mod layer;
 mod model;

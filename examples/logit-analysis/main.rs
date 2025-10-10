@@ -100,8 +100,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         predicted_token_text, predicted_token_id, token_logits[0].1
     );
     println!(
-        "Expected (Ollama): '{}' (ID: {}) → logit: {:.6}",
-        "▁Yes", expected_token_id, expected_logit
+        "Expected (Ollama): '▁Yes' (ID: {}) → logit: {:.6}",
+        expected_token_id, expected_logit
     );
 
     let logit_diff = token_logits[0].1 - expected_logit;
@@ -111,7 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("✅ PREDICTION MATCHES!");
     } else {
         println!("❌ PREDICTION MISMATCH!");
-        println!("   Our model predicts '{}' instead of '{}'", predicted_token_text, "▁Yes");
+        println!("   Our model predicts '{}' instead of '▁Yes'", predicted_token_text);
     }
 
     Ok(())

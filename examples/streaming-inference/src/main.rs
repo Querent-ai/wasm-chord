@@ -61,11 +61,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Test prompts for streaming generation
-    let test_prompts = vec![
-        "The future of AI is",
-        "Once upon a time",
-        "The secret to happiness is",
-    ];
+    let test_prompts =
+        vec!["The future of AI is", "Once upon a time", "The secret to happiness is"];
 
     for (i, prompt) in test_prompts.iter().enumerate() {
         println!("\n---");

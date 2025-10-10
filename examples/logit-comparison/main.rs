@@ -80,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Check if llama.cpp's top token (29892) is in our predictions
     let llama_token = 29892;
-    if let Some((idx, (token_id, logit))) =
+    if let Some((idx, (_token_id, logit))) =
         indexed_logits.iter().enumerate().find(|(_, (tid, _))| *tid == llama_token)
     {
         println!(
@@ -101,9 +101,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Run llama.cpp to get logits
     let output = Command::new("ollama")
-        .args(&["run", "tinyllama", "--verbose"])
-        .arg(format!("--prompt {}", prompt))
-        .arg("--num-predict 1")
+        .args(["run", "tinyllama", "--verbose"])
+        .arg("--prompt")
+        .arg(prompt)
+        .arg("--num-predict")
+        .arg("1")
         .output()?;
 
     if !output.status.success() {
@@ -125,7 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Run llama.cpp with logit output
             let llama_result = Command::new("llama-cpp")
-                .args(&["-m", model_path, "-p", prompt, "--logits", "-n", "1"])
+                .args(["-m", model_path, "-p", prompt, "--logits", "-n", "1"])
                 .output();
 
             if let Ok(result) = llama_result {

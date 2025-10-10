@@ -13,9 +13,14 @@ bytemuck = { workspace = true }
 rayon = { workspace = true }
 ndarray = { workspace = true }
 
-# Candle for optimized CPU matmul
+# Candle for optimized CPU matmul and GPU support
 candle-core = { workspace = true }
 candle-nn = { workspace = true }
+
+[features]
+default = []
+cuda = ["candle-core/cuda"]
+metal = ["candle-core/metal"]
 
 [dev-dependencies]
 criterion = { workspace = true }

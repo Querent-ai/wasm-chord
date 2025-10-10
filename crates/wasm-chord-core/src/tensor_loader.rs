@@ -109,30 +109,30 @@ impl TensorLoader {
                 let block_size = std::mem::size_of::<crate::quant::BlockQ5_K>();
                 let num_blocks = raw_data.len() / block_size;
                 let mut output = vec![0.0f32; num_blocks * 256];
-                
+
                 for (i, block_data) in raw_data.chunks_exact(block_size).enumerate() {
-                    let block = unsafe { 
-                        std::ptr::read(block_data.as_ptr() as *const crate::quant::BlockQ5_K) 
+                    let block = unsafe {
+                        std::ptr::read(block_data.as_ptr() as *const crate::quant::BlockQ5_K)
                     };
                     let output_slice = &mut output[i * 256..(i + 1) * 256];
                     crate::quant::dequantize_q5_k(&block, output_slice)?;
                 }
-                
+
                 output
             }
             DataType::Q8_K => {
                 let block_size = std::mem::size_of::<crate::quant::BlockQ8_K>();
                 let num_blocks = raw_data.len() / block_size;
                 let mut output = vec![0.0f32; num_blocks * 256];
-                
+
                 for (i, block_data) in raw_data.chunks_exact(block_size).enumerate() {
-                    let block = unsafe { 
-                        std::ptr::read(block_data.as_ptr() as *const crate::quant::BlockQ8_K) 
+                    let block = unsafe {
+                        std::ptr::read(block_data.as_ptr() as *const crate::quant::BlockQ8_K)
                     };
                     let output_slice = &mut output[i * 256..(i + 1) * 256];
                     crate::quant::dequantize_q8_k(&block, output_slice)?;
                 }
-                
+
                 output
             }
             _ => {
