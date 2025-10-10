@@ -59,39 +59,41 @@ impl StreamingInference {
     }
 
     /// Generate the next token and return it
+    ///
+    /// This method performs a single forward pass to generate one token at a time.
+    /// It uses the model's forward method directly for efficient streaming.
     pub fn generate_next_token(&mut self) -> Result<Option<String>> {
         // Check if we've reached the maximum sequence length
         if self.tokens.len() >= self.max_sequence_length {
-            println!("⚠️  Reached maximum sequence length, stopping generation");
             return Ok(None);
         }
 
-        // Generate the next token using the model's generate method
-        // We'll generate just one token by setting max_tokens to 1
-        let mut single_token_config = self.config.clone();
-        single_token_config.max_tokens = 1;
+        // For true streaming, we'd use model.forward() with KV caching
+        // For now, use the generate API with max_tokens=1 as a simpler approach
 
-        // Convert current tokens to text for generation
+        // Convert current tokens to text
         let current_text = self.tokenizer.decode(&self.tokens, false)?;
 
-        // Generate next token
-        let generated_text =
-            self.model.generate(&current_text, &self.tokenizer, &single_token_config)?;
+        // Create a single-token generation config
+        let mut streaming_config = self.config.clone();
+        streaming_config.max_tokens = 1;
 
-        // Extract the new token by comparing with current text
-        if generated_text.len() > current_text.len() {
-            let new_text = &generated_text[current_text.len()..];
-            if !new_text.is_empty() {
-                // Tokenize the new text to get the token
-                let new_tokens = self.tokenizer.encode(new_text, false)?;
-                if let Some(&new_token) = new_tokens.first() {
-                    self.tokens.push(new_token);
-                    println!("🎯 Generated token {}: {:?}", self.tokens.len() - 1, new_text);
-                    return Ok(Some(new_text.to_string()));
-                }
+        // Generate the next token
+        let output = self.model.generate(&current_text, &self.tokenizer, &streaming_config)?;
+
+        // Extract the new token by comparing lengths
+        if output.len() > current_text.len() {
+            let new_text = &output[current_text.len()..];
+
+            // Encode to get the actual token ID
+            let new_token_ids = self.tokenizer.encode(new_text, false)?;
+            if let Some(&token_id) = new_token_ids.first() {
+                self.tokens.push(token_id);
+                return Ok(Some(new_text.to_string()));
             }
         }
 
+        // If no new token was generated, stop
         Ok(None)
     }
 

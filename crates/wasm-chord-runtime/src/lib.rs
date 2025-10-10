@@ -12,7 +12,7 @@ mod memory64;
 mod multi_memory;
 mod sampling;
 mod sharding;
-mod streaming;
+pub mod streaming;
 mod transformer;
 
 #[cfg(target_arch = "wasm32")]
