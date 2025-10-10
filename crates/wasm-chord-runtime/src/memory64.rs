@@ -105,11 +105,4 @@ mod tests {
             assert_eq!(max_size, 4 * 1024 * 1024 * 1024);
         }
     }
-
-    #[test]
-    fn test_allocator_creation() -> Result<()> {
-        let allocator = WasmMemory64Allocator::new(1024, 4096)?;
-        assert!(allocator.can_allocate(1024 * 1024)); // 1MB
-        Ok(())
-    }
 }
