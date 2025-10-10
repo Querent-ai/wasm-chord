@@ -4,7 +4,7 @@ use rand::distributions::{Distribution, WeightedIndex};
 use rand::thread_rng;
 use wasm_chord_core::error::Result;
 use wasm_chord_core::Tokenizer;
-use wasm_chord_cpu::{matmul_f32, matmul_transposed};
+use wasm_chord_cpu::{matmul_f32_candle, matmul_transposed_candle, CandleTensorBackend};
 
 #[cfg(feature = "gpu")]
 use wasm_chord_gpu::GpuBackend;
@@ -29,6 +29,8 @@ pub struct Model {
     /// GPU backend (optional, enabled with "gpu" feature)
     #[cfg(feature = "gpu")]
     gpu: Option<GpuBackend>,
+    /// Candle tensor backend for optimized operations
+    candle_backend: CandleTensorBackend,
 }
 
 /// Transpose a matrix stored in row-major order
@@ -125,7 +127,7 @@ fn matmul_self_test() -> Result<()> {
         }
 
         let mut out = vec![0.0f32; m * n];
-        matmul_f32(&a, &b, &mut out, m, k, n)?;
+        matmul_f32_candle(&a, &b, &mut out, m, k, n)?;
 
         let expected = matmul_naive(&a, &b, m, k, n);
 
@@ -192,6 +194,7 @@ impl Model {
             config,
             #[cfg(feature = "gpu")]
             gpu: None,
+            candle_backend: CandleTensorBackend::new(),
         }
     }
 
@@ -245,14 +248,14 @@ impl Model {
             }
         }
 
-        // CPU fallback
+        // CPU fallback - use Candle if available, otherwise naive implementation
         let mut result = vec![0.0; m * n];
         if transposed_b {
             // B is stored as [n, k] (GGUF format), use optimized transpose matmul
-            matmul_transposed(a, b, &mut result, m, k, n)?;
+            matmul_transposed_candle(a, b, &mut result, m, k, n)?;
         } else {
             // Standard matmul: B is [k, n]
-            matmul_f32(a, b, &mut result, m, k, n)?;
+            matmul_f32_candle(a, b, &mut result, m, k, n)?;
         }
         Ok(result)
     }
@@ -620,6 +623,7 @@ impl Model {
             hidden_states,
             kv_cache,
             position,
+            &self.candle_backend,
             #[cfg(feature = "gpu")]
             gpu,
         )
@@ -737,8 +741,14 @@ impl Model {
             }
         }
 
-        // 3. Final normalization
-        hidden_states = self.rms_norm(&hidden_states, &self.output_norm)?;
+        // 3. Final normalization using Candle
+        hidden_states = self.candle_backend.rms_norm(
+            &hidden_states,
+            &self.output_norm,
+            self.config.rms_norm_eps,
+            seq_len, // Use actual seq_len
+            self.config.hidden_size,
+        )?;
 
         // DEBUG: Validate hidden states after final RMSNorm
         if debug {

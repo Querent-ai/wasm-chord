@@ -105,6 +105,18 @@ impl TensorLoader {
                 // Dequantize Q6_K
                 self.dequantize_q6_k(&raw_data, metadata.desc.element_count())?
             }
+            DataType::Q5_K => {
+                // TODO: Implement Q5_K dequantization
+                return Err(Error::UnsupportedDataType(
+                    "Q5_K dequantization not yet implemented".to_string(),
+                ));
+            }
+            DataType::Q8_K => {
+                // TODO: Implement Q8_K dequantization
+                return Err(Error::UnsupportedDataType(
+                    "Q8_K dequantization not yet implemented".to_string(),
+                ));
+            }
             _ => {
                 return Err(Error::UnsupportedDataType(format!(
                     "Unsupported dtype for loading: {:?}",

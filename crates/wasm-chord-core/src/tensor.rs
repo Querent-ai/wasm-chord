@@ -32,6 +32,8 @@ pub enum DataType {
     Q5_K,
     /// 6-bit quantized (K-quant)
     Q6_K,
+    /// 8-bit quantized (K-quant)
+    Q8_K,
     /// Other quantization types (we'll handle them as unsupported for now)
     #[allow(dead_code)]
     Unsupported,
@@ -47,7 +49,12 @@ impl DataType {
             // Quantized types have variable size, handled separately
             DataType::Q4_0 | DataType::Q4_1 | DataType::Q5_0 | DataType::Q5_1 => 0,
             DataType::Q8_0 | DataType::Q8_1 => 1,
-            DataType::Q2_K | DataType::Q3_K | DataType::Q4_K | DataType::Q5_K | DataType::Q6_K => 0,
+            DataType::Q2_K
+            | DataType::Q3_K
+            | DataType::Q4_K
+            | DataType::Q5_K
+            | DataType::Q6_K
+            | DataType::Q8_K => 0,
             DataType::Unsupported => 0,
         }
     }
@@ -151,6 +158,18 @@ impl TensorDesc {
                     // Q6_K: 256 elements per block, 210 bytes per block
                     let block_size = 256;
                     let bytes_per_block = 210;
+                    (shape.numel() / block_size) * bytes_per_block
+                }
+                DataType::Q5_K => {
+                    // Q5_K: 256 elements per block, 176 bytes per block
+                    let block_size = 256;
+                    let bytes_per_block = 176;
+                    (shape.numel() / block_size) * bytes_per_block
+                }
+                DataType::Q8_K => {
+                    // Q8_K: 256 elements per block, 322 bytes per block
+                    let block_size = 256;
+                    let bytes_per_block = 322;
                     (shape.numel() / block_size) * bytes_per_block
                 }
                 _ => {

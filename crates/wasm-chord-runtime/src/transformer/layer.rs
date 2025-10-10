@@ -1,6 +1,7 @@
 //! Transformer layer implementation
 
 use wasm_chord_core::error::Result;
+use wasm_chord_cpu::CandleTensorBackend;
 
 #[cfg(feature = "gpu")]
 use wasm_chord_gpu::GpuBackend;
@@ -38,6 +39,7 @@ impl TransformerLayer {
         hidden_states: &[f32],
         kv_cache: &mut KVCache,
         position: usize,
+        candle_backend: &CandleTensorBackend,
         #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
     ) -> Result<Vec<f32>> {
         // DEBUG: Dump layer input for layer 0
@@ -51,8 +53,17 @@ impl TransformerLayer {
 
         // Pre-norm architecture (like LLaMA)
 
+        // Calculate sequence length from input dimensions
+        let seq_len = hidden_states.len() / self.attention_norm.len();
+
         // 1. Attention block with residual
-        let normed = self.rms_norm(hidden_states, &self.attention_norm)?;
+        let normed = candle_backend.rms_norm(
+            hidden_states,
+            &self.attention_norm,
+            1e-6,    // RMS norm epsilon
+            seq_len, // Use calculated seq_len
+            self.attention_norm.len(),
+        )?;
         let attn_output = self.attention.forward(
             &normed,
             &self.attention_weights,
@@ -62,13 +73,17 @@ impl TransformerLayer {
             gpu,
         )?;
 
-        let mut hidden = hidden_states.to_vec();
-        for i in 0..hidden.len() {
-            hidden[i] += attn_output[i];
-        }
+        // Add residual connection using Candle
+        let hidden = candle_backend.add(hidden_states, &attn_output, hidden_states.len())?;
 
         // 2. FFN block with residual
-        let normed = self.rms_norm(&hidden, &self.ffn_norm)?;
+        let normed = candle_backend.rms_norm(
+            &hidden,
+            &self.ffn_norm,
+            1e-6,    // RMS norm epsilon
+            seq_len, // Use calculated seq_len
+            self.ffn_norm.len(),
+        )?;
         let ffn_output = self.ffn.forward(
             &normed,
             &self.ffn_weights,
@@ -76,11 +91,10 @@ impl TransformerLayer {
             gpu,
         )?;
 
-        for i in 0..hidden.len() {
-            hidden[i] += ffn_output[i];
-        }
+        // Add residual connection using Candle
+        let final_hidden = candle_backend.add(&hidden, &ffn_output, hidden.len())?;
 
-        Ok(hidden)
+        Ok(final_hidden)
     }
 
     pub fn rms_norm(&self, input: &[f32], weight: &[f32]) -> Result<Vec<f32>> {

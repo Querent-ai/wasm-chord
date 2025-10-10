@@ -2,10 +2,14 @@
 //!
 //! Provides SIMD-accelerated kernels for tensor operations on CPU.
 
+pub mod candle_backend;
+pub mod candle_tensor_backend;
 pub mod fused;
 pub mod gemm;
 pub mod kernels;
 
+pub use candle_backend::{matmul_f32_candle, matmul_transposed_candle};
+pub use candle_tensor_backend::CandleTensorBackend;
 pub use fused::{
     fused_attention_score, fused_dequant_matmul_q4k, fused_rmsnorm_linear, fused_swiglu_proj,
 };

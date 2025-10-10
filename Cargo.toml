@@ -31,7 +31,7 @@ members = [
     "examples/vocab-check",
     "examples/argmax-test",
     "examples/kv-cache-test",
-    "examples/test-prompts",
+        "examples/streaming-inference",
     "examples/kernel-verification",
     "examples/ollama-comparison",
     "examples/tokenization-check",
@@ -103,6 +103,10 @@ tokio = { version = "1.35", features = ["full"] }
 # Math
 ndarray = { version = "0.15", features = ["rayon"] }
 rayon = "1.8"
+
+# Candle ML framework (CPU backend)
+candle-core = "0.9"
+candle-nn = "0.9"
 
 # Testing
 criterion = "0.5"

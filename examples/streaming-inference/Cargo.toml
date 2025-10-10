@@ -1,0 +1,9 @@
+[package]
+name = "streaming-inference"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wasm-chord-core = { path = "../../crates/wasm-chord-core" }
+wasm-chord-runtime = { path = "../../crates/wasm-chord-runtime" }
+pollster = "0.3"
