@@ -329,6 +329,20 @@ impl Model {
             eprintln!("LOADED 'output.weight' raw.len={}", lm_head_data.len());
             tensor_stats("output.weight (raw)", lm_head_data);
 
+            // DEBUG: Check raw bytes for token 29892 before dequantization
+            if std::env::var("DEBUG_TRACE").is_ok() {
+                let token_id = 29892;
+                let hidden_size = self.config.hidden_size;
+                let row_start_bytes = token_id * hidden_size * 4; // 4 bytes per f32
+                eprintln!("Raw bytes for token {} (offset {}):", token_id, row_start_bytes);
+                for i in 0..20 {
+                    if row_start_bytes + i < lm_head_data.len() {
+                        eprint!("{:02x} ", lm_head_data[row_start_bytes + i] as u8);
+                    }
+                }
+                eprintln!();
+            }
+
             println!("🔍 Loading LM head tensor: {} elements", lm_head_data.len());
             // GGUF stores output.weight as [vocab_size, hidden_size]
             // Store as-is for matmul_transposed
@@ -338,6 +352,39 @@ impl Model {
                 "✅ LM head loaded (shape: [vocab_size={}, hidden_size={}]) for transposed matmul",
                 self.config.vocab_size, self.config.hidden_size
             );
+
+            // DEBUG: Print LM head weights for token 29892 (the problematic token)
+            if std::env::var("DEBUG_TRACE").is_ok() {
+                let token_id = 29892;
+                let row_start = token_id * self.config.hidden_size;
+                eprintln!(
+                    "LM_HEAD[{}][0:5]: {:.6} {:.6} {:.6} {:.6} {:.6}",
+                    token_id,
+                    self.lm_head[row_start],
+                    self.lm_head[row_start + 1],
+                    self.lm_head[row_start + 2],
+                    self.lm_head[row_start + 3],
+                    self.lm_head[row_start + 4]
+                );
+
+                // Find the exact boundary where zeros start
+                for test_token in [
+                    0, 1, 15043, 10588, 29800, 29805, 29810, 29815, 29820, 29825, 29830, 29835,
+                    29840, 29845, 29850, 29855, 29860, 29865, 29870, 29875, 29880, 29885, 29890,
+                    29892, 29900, 31990, 31995, 31999,
+                ] {
+                    let test_row_start = test_token * self.config.hidden_size;
+                    eprintln!(
+                        "LM_HEAD[{}][0:5]: {:.6} {:.6} {:.6} {:.6} {:.6}",
+                        test_token,
+                        self.lm_head[test_row_start],
+                        self.lm_head[test_row_start + 1],
+                        self.lm_head[test_row_start + 2],
+                        self.lm_head[test_row_start + 3],
+                        self.lm_head[test_row_start + 4]
+                    );
+                }
+            }
         } else if let Ok(lm_head_data) = tensor_loader.load_tensor("lm_head.weight", parser) {
             println!("✅ Found 'lm_head.weight'");
             eprintln!("LOADED 'lm_head.weight' raw.len={}", lm_head_data.len());
@@ -347,6 +394,21 @@ impl Model {
             self.lm_head.copy_from_slice(lm_head_data);
             tensor_stats("lm_head.weight (model)", &self.lm_head);
             println!("✅ LM head loaded for transposed matmul");
+
+            // DEBUG: Print LM head weights for token 29892 (the problematic token)
+            if std::env::var("DEBUG_TRACE").is_ok() {
+                let token_id = 29892;
+                let row_start = token_id * self.config.hidden_size;
+                eprintln!(
+                    "LM_HEAD[{}][0:5]: {:.6} {:.6} {:.6} {:.6} {:.6}",
+                    token_id,
+                    self.lm_head[row_start],
+                    self.lm_head[row_start + 1],
+                    self.lm_head[row_start + 2],
+                    self.lm_head[row_start + 3],
+                    self.lm_head[row_start + 4]
+                );
+            }
         } else if let Ok(lm_head_data) = tensor_loader.load_tensor("model.lm_head.weight", parser) {
             println!("✅ Found 'model.lm_head.weight'");
             eprintln!("LOADED 'model.lm_head.weight' raw.len={}", lm_head_data.len());
@@ -356,6 +418,21 @@ impl Model {
             self.lm_head.copy_from_slice(lm_head_data);
             tensor_stats("model.lm_head.weight (model)", &self.lm_head);
             println!("✅ LM head loaded for transposed matmul");
+
+            // DEBUG: Print LM head weights for token 29892 (the problematic token)
+            if std::env::var("DEBUG_TRACE").is_ok() {
+                let token_id = 29892;
+                let row_start = token_id * self.config.hidden_size;
+                eprintln!(
+                    "LM_HEAD[{}][0:5]: {:.6} {:.6} {:.6} {:.6} {:.6}",
+                    token_id,
+                    self.lm_head[row_start],
+                    self.lm_head[row_start + 1],
+                    self.lm_head[row_start + 2],
+                    self.lm_head[row_start + 3],
+                    self.lm_head[row_start + 4]
+                );
+            }
         } else {
             // Weight tying: LM head shares weights with token embeddings
             println!("🔍 Using weight tying - LM head from token embeddings");
@@ -601,6 +678,18 @@ impl Model {
             );
         }
 
+        // DEBUG: Print token embeddings for comparison
+        if std::env::var("DEBUG_TRACE").is_ok() {
+            eprintln!(
+                "EMB[0:5]: {:.6} {:.6} {:.6} {:.6} {:.6}",
+                hidden_states[0],
+                hidden_states[1],
+                hidden_states[2],
+                hidden_states[3],
+                hidden_states[4]
+            );
+        }
+
         // 2. Pass through transformer layers
         let profile = std::env::var("PROFILE").is_ok();
         for layer_idx in 0..self.config.num_layers {
@@ -612,6 +701,31 @@ impl Model {
                 );
             }
             hidden_states = self.forward_layer(layer_idx, &hidden_states, position)?;
+
+            // DEBUG: Print layer outputs for comparison
+            if std::env::var("DEBUG_TRACE").is_ok() {
+                if layer_idx == 0 {
+                    eprintln!(
+                        "L0_OUT[0:5]: {:.6} {:.6} {:.6} {:.6} {:.6}",
+                        hidden_states[0],
+                        hidden_states[1],
+                        hidden_states[2],
+                        hidden_states[3],
+                        hidden_states[4]
+                    );
+                }
+                if layer_idx == self.config.num_layers - 1 {
+                    eprintln!(
+                        "L21_OUT[0:5]: {:.6} {:.6} {:.6} {:.6} {:.6}",
+                        hidden_states[0],
+                        hidden_states[1],
+                        hidden_states[2],
+                        hidden_states[3],
+                        hidden_states[4]
+                    );
+                }
+            }
+
             if profile {
                 eprintln!("  Layer {} took {:?}", layer_idx, layer_start.elapsed());
             }
@@ -658,6 +772,14 @@ impl Model {
         // This avoids computing logits for all prompt tokens during prefill
         let last_hidden_start = (seq_len - 1) * hidden_size;
         let last_hidden = &hidden_states[last_hidden_start..last_hidden_start + hidden_size];
+
+        // DEBUG: Print hidden states before LM head for comparison
+        if std::env::var("DEBUG_TRACE").is_ok() {
+            eprintln!(
+                "HIDDEN[0:5]: {:.6} {:.6} {:.6} {:.6} {:.6}",
+                last_hidden[0], last_hidden[1], last_hidden[2], last_hidden[3], last_hidden[4]
+            );
+        }
 
         // DEBUG: Check hidden states before LM head
         if std::env::var("DEBUG_LOGITS").is_ok() {

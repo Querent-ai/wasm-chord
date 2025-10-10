@@ -42,19 +42,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ Model loaded\n");
 
     // Test prompts
-    let test_cases = vec![
-        ("The quick brown fox", 10),
-        ("Once upon a time", 10),
-        ("The capital of France is", 8),
-        ("Hello world", 10),
-        ("To be or not to be", 10),
-        ("In a galaxy far", 10),
-        ("The weather today is", 10),
-        ("Machine learning is", 10),
-    ];
+    let test_cases = vec![("Hi", 20)];
 
     let config = GenerationConfig {
-        max_tokens: 10,
+        max_tokens: 20,
         temperature: 0.0, // Deterministic
         top_p: 0.9,
         top_k: 40,

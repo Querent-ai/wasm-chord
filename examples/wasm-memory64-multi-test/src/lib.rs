@@ -7,7 +7,6 @@ use wasm_chord_runtime::{MemoryAllocator, MemoryConfig, MemoryRegion, MultiMemor
 
 // Include the real Memory64 implementation
 mod real_memory64;
-use real_memory64::RealMemory64Test;
 
 // Export functions for JavaScript to call
 #[wasm_bindgen]
@@ -23,12 +22,7 @@ impl WasmMemoryTest {
     /// Create a new memory test instance
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self {
-            allocator: MemoryAllocator::new(MemoryConfig::default()),
-            multi_memory: MultiMemoryLayout::new(),
-            #[cfg(feature = "memory64")]
-            memory64_allocator: None,
-        }
+        Self::default()
     }
 
     /// Test basic memory allocation
@@ -56,13 +50,13 @@ impl WasmMemoryTest {
     /// Test real WASM Memory64 allocation using memory.grow()
     #[wasm_bindgen]
     pub fn test_real_memory64_allocation(&mut self, size_mb: usize) -> Result<JsValue, JsValue> {
-        let mut real_test = RealMemory64Test::new();
+        let mut real_test = real_memory64::RealMemory64Test::new();
         real_test.test_memory64_allocation(size_mb)
     }
 
     /// Test Memory64 allocation (>4GB)
     #[wasm_bindgen]
-    pub fn test_memory64_allocation(&mut self, size_mb: usize) -> Result<JsValue, JsValue> {
+    pub fn test_memory64_allocation(&mut self, _size_mb: usize) -> Result<JsValue, JsValue> {
         #[cfg(feature = "memory64")]
         {
             if self.memory64_allocator.is_none() {
@@ -181,14 +175,14 @@ impl WasmMemoryTest {
     /// Find the real WASM memory limit
     #[wasm_bindgen]
     pub fn find_real_memory_limit(&mut self) -> JsValue {
-        let mut real_test = RealMemory64Test::new();
+        let mut real_test = real_memory64::RealMemory64Test::new();
         real_test.find_memory_limit()
     }
 
     /// Get real WASM memory statistics
     #[wasm_bindgen]
     pub fn get_real_memory_stats(&self) -> JsValue {
-        let real_test = RealMemory64Test::new();
+        let real_test = real_memory64::RealMemory64Test::new();
         real_test.get_memory_stats()
     }
 
@@ -225,6 +219,17 @@ impl WasmMemoryTest {
         }
 
         JsValue::from_str(&results.join("\n"))
+    }
+}
+
+impl Default for WasmMemoryTest {
+    fn default() -> Self {
+        Self {
+            allocator: MemoryAllocator::new(MemoryConfig::default()),
+            multi_memory: MultiMemoryLayout::new(),
+            #[cfg(feature = "memory64")]
+            memory64_allocator: None,
+        }
     }
 }
 

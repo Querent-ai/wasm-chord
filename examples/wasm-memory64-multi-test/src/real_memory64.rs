@@ -1,6 +1,6 @@
-use js_sys::Uint8Array;
 /// Real WebAssembly Memory64 Implementation
 /// This uses actual WASM Memory64 features, not just Rust simulation
+use js_sys::Uint8Array;
 use wasm_bindgen::prelude::*;
 
 // Import WebAssembly memory functions
@@ -39,6 +39,7 @@ fn get_memory() -> Memory {
 
 /// Real Memory64 WASM Test
 #[wasm_bindgen]
+#[derive(Default)]
 pub struct RealMemory64Test {
     // Track allocations for cleanup
     allocations: Vec<usize>,
@@ -49,7 +50,7 @@ impl RealMemory64Test {
     /// Create a new real Memory64 test instance
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self { allocations: Vec::new() }
+        Self::default()
     }
 
     /// Test actual WASM memory allocation using memory.grow()
@@ -224,7 +225,7 @@ pub fn detect_wasm_features() -> JsValue {
     let memory = get_memory();
     let max_pages = memory.maximum().unwrap_or(0);
 
-    let features = vec![
+    let features = [
         ("Memory64", max_pages > 65536), // >4GB limit
         ("Multi-Memory", true),          // Simulated
         ("SIMD", cfg!(target_feature = "simd128")),

@@ -127,8 +127,37 @@ impl TensorDesc {
         shape.validate()?;
 
         let size_bytes = if dtype.is_quantized() {
-            // Placeholder: actual size depends on group size
-            shape.numel() / 2 // Approximate for Q4
+            // Calculate actual size based on quantization type
+            match dtype {
+                DataType::Q4_0 | DataType::Q4_1 => {
+                    // Q4_0: 32 elements per block, 16 bytes per block
+                    let block_size = 32;
+                    let bytes_per_block = 16;
+                    (shape.numel() / block_size) * bytes_per_block
+                }
+                DataType::Q8_0 | DataType::Q8_1 => {
+                    // Q8_0: 32 elements per block, 33 bytes per block (32 + 1 scale)
+                    let block_size = 32;
+                    let bytes_per_block = 33;
+                    (shape.numel() / block_size) * bytes_per_block
+                }
+                DataType::Q4_K => {
+                    // Q4_K: 256 elements per block, 144 bytes per block
+                    let block_size = 256;
+                    let bytes_per_block = 144;
+                    (shape.numel() / block_size) * bytes_per_block
+                }
+                DataType::Q6_K => {
+                    // Q6_K: 256 elements per block, 210 bytes per block
+                    let block_size = 256;
+                    let bytes_per_block = 210;
+                    (shape.numel() / block_size) * bytes_per_block
+                }
+                _ => {
+                    // Fallback to approximation
+                    shape.numel() / 2
+                }
+            }
         } else {
             shape.numel() * dtype.size()
         };

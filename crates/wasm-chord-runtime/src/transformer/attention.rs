@@ -83,7 +83,7 @@ impl MultiHeadAttention {
             seq_len,
             hidden_size,
             hidden_size,
-            false, // CORRECT: GGUF stores weights in standard format
+            true, // FIXED: GGUF stores weights in transposed format
             #[cfg(feature = "gpu")]
             gpu,
         )?;
@@ -111,7 +111,7 @@ impl MultiHeadAttention {
             seq_len,
             hidden_size,
             self.config.num_kv_heads * self.head_dim,
-            false, // CORRECT: GGUF stores weights in standard format
+            true, // FIXED: GGUF stores weights in transposed format
             #[cfg(feature = "gpu")]
             gpu,
         )?;
@@ -123,7 +123,7 @@ impl MultiHeadAttention {
             seq_len,
             hidden_size,
             self.config.num_kv_heads * self.head_dim,
-            false, // CORRECT: GGUF stores weights in standard format
+            true, // FIXED: GGUF stores weights in transposed format
             #[cfg(feature = "gpu")]
             gpu,
         )?;
@@ -185,7 +185,7 @@ impl MultiHeadAttention {
             seq_len,
             hidden_size,
             hidden_size,
-            false, // CORRECT: GGUF stores weights in standard format
+            true, // FIXED: GGUF stores weights in transposed format
             #[cfg(feature = "gpu")]
             gpu,
         )?;

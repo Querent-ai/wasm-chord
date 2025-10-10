@@ -43,3 +43,4 @@ models/
 llama2.c/
 tools/
 venv/
+data/

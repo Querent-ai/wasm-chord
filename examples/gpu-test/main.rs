@@ -1,4 +1,3 @@
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🎮 GPU-Accelerated Generation Test");
     println!("===================================\n");

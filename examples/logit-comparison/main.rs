@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("==================================\n");
 
     // Load our model
-    let model_path = "models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf";
+    let model_path = "/home/puneet/wasm-chord/models/tinyllama-1.1b.Q4_K_M.gguf";
     println!("📂 Loading model: {}", model_path);
 
     let file = File::open(model_path)?;
@@ -30,9 +30,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load weights
     let mut model = Model::new(config.clone());
     let data_offset = parser.tensor_data_offset()?;
+    println!("🔍 Data offset: {}", data_offset);
     let mut tensor_loader = TensorLoader::new(data_offset);
 
     for tensor_desc in meta.tensors.iter() {
+        if tensor_desc.name == "output.weight" {
+            println!(
+                "🔍 output.weight tensor: offset={}, size_bytes={}, shape={:?}",
+                tensor_desc.offset, tensor_desc.size_bytes, tensor_desc.shape
+            );
+        }
         tensor_loader.register_tensor(
             tensor_desc.name.clone(),
             tensor_desc.clone(),
@@ -53,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🎯 Testing prompt: \"{}\"", prompt);
 
     // Get our logits
-    let tokens = tokenizer.encode(prompt, false)?;
+    let tokens = tokenizer.encode(prompt, true)?;
     println!("📝 Our tokens: {:?}", tokens);
 
     // Forward pass to get logits
@@ -65,10 +72,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         logits.iter().enumerate().map(|(i, &v)| (i, v)).collect();
     indexed_logits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-    println!("\n🏆 Our top 10 logits:");
-    for (i, (token_id, logit)) in indexed_logits.iter().take(10).enumerate() {
+    println!("\n🏆 Our top 20 logits:");
+    for (i, (token_id, logit)) in indexed_logits.iter().take(20).enumerate() {
         let token_text = tokenizer.id_to_token(*token_id as u32);
         println!("  {}: token {} = {:.6} ({:?})", i + 1, token_id, logit, token_text);
+    }
+
+    // Check if llama.cpp's top token (29892) is in our predictions
+    let llama_token = 29892;
+    if let Some((idx, (token_id, logit))) =
+        indexed_logits.iter().enumerate().find(|(_, (tid, _))| *tid == llama_token)
+    {
+        println!(
+            "\n🎯 Found llama.cpp token {} at position {} with logit {:.6}",
+            llama_token,
+            idx + 1,
+            logit
+        );
+    } else {
+        println!("\n❌ llama.cpp token {} NOT found in top 20 predictions", llama_token);
     }
 
     // Now get Ollama's logits using llama.cpp directly
