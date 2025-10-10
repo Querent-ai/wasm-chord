@@ -240,15 +240,19 @@ impl CallbackStreamingInference {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wasm_chord_runtime::{GenerationConfig, TransformerConfig};
+    use crate::{GenerationConfig, TransformerConfig};
 
     #[test]
     fn test_streaming_inference_creation() {
         // This is a basic test to ensure the struct can be created
         // In a real test, you'd need a proper model and tokenizer
         let config = TransformerConfig::default();
-        let model = Model::new(&config);
-        let tokenizer = Tokenizer::new(32000, true);
+        let model = Model::new(config.clone());
+        let tokenizer = Tokenizer::new(
+            std::collections::HashMap::new(),
+            Vec::new(),
+            wasm_chord_core::tokenizer::SpecialTokens::default(),
+        );
         let gen_config = GenerationConfig::default();
 
         let streaming = StreamingInference::new(model, tokenizer, gen_config, None);

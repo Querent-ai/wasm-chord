@@ -91,7 +91,8 @@ mod tests {
 
         assert!(result.is_ok());
         let logits = result.unwrap();
-        assert_eq!(logits.len(), input_tokens.len() * model.config.vocab_size);
+        // In inference mode, we only return logits for the last token
+        assert_eq!(logits.len(), model.config.vocab_size);
     }
 
     #[test]

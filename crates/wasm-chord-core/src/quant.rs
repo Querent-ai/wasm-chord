@@ -125,6 +125,30 @@ pub struct BlockQ6_K {
     pub d: u16,                  // f16 super-block scale (stored as u16)
 }
 
+/// Q5_K block: 256 5-bit values in a super-block
+/// Structure based on ggml implementation
+/// Total: 176 bytes (128 ql + 32 qh + 16 scales + 2 d)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct BlockQ5_K {
+    pub ql: [u8; QK_K / 2],      // Lower 4 bits of 5-bit quants
+    pub qh: [u8; QK_K / 8],      // Upper 1 bit of 5-bit quants
+    pub scales: [i8; QK_K / 16], // 16 scales per block
+    pub d: u16,                  // f16 super-block scale (stored as u16)
+}
+
+/// Q8_K block: 256 8-bit values in a super-block
+/// Structure based on ggml implementation
+/// Total: 322 bytes (256 quants + 32 scales + 2 d + 2 dmin)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct BlockQ8_K {
+    pub quants: [i8; QK_K],      // 8-bit quantized values
+    pub scales: [u8; QK_K / 8],  // 32 scales per block (4 bits each)
+    pub d: u16,                  // f16 super-block scale (stored as u16)
+    pub dmin: u16,               // f16 super-block min scale (stored as u16)
+}
+
 /// Dequantize Q4_0 block to f32
 /// NOTE: Using default scale for this non-standard Q4_0 format
 pub fn dequantize_q4_0(block: &BlockQ4_0, output: &mut [f32]) -> Result<()> {
@@ -236,13 +260,96 @@ pub fn dequantize_q6_k(block: &BlockQ6_K, output: &mut [f32]) -> Result<()> {
     Ok(())
 }
 
+/// Dequantize Q5_K block to f32
+/// Q5_K uses 256-element super-blocks with 5-bit quantization
+/// Based on ggml dequantize_row_q5_K implementation
+pub fn dequantize_q5_k(block: &BlockQ5_K, output: &mut [f32]) -> Result<()> {
+    if output.len() != QK_K {
+        return Err(Error::InvalidShape(format!("Output buffer must be {} elements", QK_K)));
+    }
+
+    // Convert f16 to f32
+    let d = half::f16::from_bits(block.d).to_f32();
+
+    // Process 256 elements in 16 groups of 16
+    for l in 0..16 {
+        let is = l;
+        
+        // Extract 16 values from the packed layout
+        // Q5_K: 4 bits from ql + 1 bit from qh
+        for k in 0..16 {
+            let ql_idx = l * 16 + k;
+            if ql_idx >= QK_K || ql_idx >= block.ql.len() {
+                break;
+            }
+            
+            let qh_idx = l * 2 + (k / 8);
+            if qh_idx >= block.qh.len() {
+                break;
+            }
+            
+            let qh_bit = (k % 8) / 4; // Which bit in the qh byte
+            
+            let ql_val = block.ql[ql_idx] as i8;
+            let qh_val = (block.qh[qh_idx] >> (qh_bit * 4)) & 0xF;
+            
+            // Combine 4 bits from ql with 1 bit from qh
+            let quant_val = ql_val | ((qh_val as i8) << 4);
+            
+            // Apply scale and write output
+            output[ql_idx] = d * (block.scales[is] as f32) * (quant_val as f32);
+        }
+    }
+
+    Ok(())
+}
+
+/// Dequantize Q8_K block to f32
+/// Q8_K uses 256-element super-blocks with 8-bit quantization
+/// Based on ggml dequantize_row_q8_K implementation
+pub fn dequantize_q8_k(block: &BlockQ8_K, output: &mut [f32]) -> Result<()> {
+    if output.len() != QK_K {
+        return Err(Error::InvalidShape(format!("Output buffer must be {} elements", QK_K)));
+    }
+
+    // Convert f16 to f32
+    let d = half::f16::from_bits(block.d).to_f32();
+    let min = half::f16::from_bits(block.dmin).to_f32();
+
+    // Process 256 elements in 32 groups of 8
+    for l in 0..32 {
+        let is = l;
+        
+        // Extract scale for this group (4 bits per scale)
+        let scale_byte = block.scales[is / 2];
+        let scale_val = if is % 2 == 0 {
+            scale_byte & 0xF
+        } else {
+            scale_byte >> 4
+        };
+        
+        // Process 8 values in this group
+        for k in 0..8 {
+            let idx = l * 8 + k;
+            let quant_val = block.quants[idx] as f32;
+            
+            // Apply scale and write output
+            output[idx] = d * (scale_val as f32) * quant_val + min;
+        }
+    }
+
+    Ok(())
+}
+
 /// Get block size for quantization type
 pub fn get_block_size(dtype: DataType) -> Option<usize> {
     match dtype {
         DataType::Q4_0 | DataType::Q4_1 => Some(Q4_BLOCK_SIZE),
         DataType::Q8_0 | DataType::Q8_1 => Some(Q8_BLOCK_SIZE),
         DataType::Q4_K => Some(QK_K),
+        DataType::Q5_K => Some(QK_K),
         DataType::Q6_K => Some(QK_K),
+        DataType::Q8_K => Some(QK_K),
         _ => None,
     }
 }
@@ -330,6 +437,64 @@ mod tests {
         assert!(!has_inf, "Q6_K dequantization produced inf");
 
         // Check reasonable value ranges (-32 to 31 after bias, times scale and d)
+        for (i, &val) in output.iter().enumerate() {
+            assert!(val.abs() <= 100.0, "Value at index {} is out of range: {}", i, val);
+        }
+    }
+
+    #[test]
+    fn test_q5_k_dequant() {
+        // Create a simple Q5_K block
+        let mut block = BlockQ5_K {
+            ql: [0u8; QK_K / 2],
+            qh: [0u8; QK_K / 8],
+            scales: [1i8; QK_K / 16],
+            d: half::f16::from_f32(1.0).to_bits(),
+        };
+
+        // Set some test values
+        block.ql[0] = 0x10; // Lower 4 bits = 0, upper 4 bits = 1
+        block.qh[0] = 0x00; // No high bits
+
+        let mut output = [0.0f32; QK_K];
+        dequantize_q5_k(&block, &mut output).unwrap();
+
+        // Check that we don't have inf/nan
+        let has_nan = output.iter().any(|&x| x.is_nan());
+        let has_inf = output.iter().any(|&x| x.is_infinite());
+        assert!(!has_nan, "Q5_K dequantization produced NaN");
+        assert!(!has_inf, "Q5_K dequantization produced inf");
+
+        // Check reasonable value ranges
+        for (i, &val) in output.iter().enumerate() {
+            assert!(val.abs() <= 100.0, "Value at index {} is out of range: {}", i, val);
+        }
+    }
+
+    #[test]
+    fn test_q8_k_dequant() {
+        // Create a simple Q8_K block
+        let mut block = BlockQ8_K {
+            quants: [0i8; QK_K],
+            scales: [0u8; QK_K / 8],
+            d: half::f16::from_f32(1.0).to_bits(),
+            dmin: half::f16::from_f32(0.0).to_bits(),
+        };
+
+        // Set some test values
+        block.quants[0] = 10; // Test value
+        block.scales[0] = 0x11; // Simple scale pattern
+
+        let mut output = [0.0f32; QK_K];
+        dequantize_q8_k(&block, &mut output).unwrap();
+
+        // Check that we don't have inf/nan
+        let has_nan = output.iter().any(|&x| x.is_nan());
+        let has_inf = output.iter().any(|&x| x.is_infinite());
+        assert!(!has_nan, "Q8_K dequantization produced NaN");
+        assert!(!has_inf, "Q8_K dequantization produced inf");
+
+        // Check reasonable value ranges
         for (i, &val) in output.iter().enumerate() {
             assert!(val.abs() <= 100.0, "Value at index {} is out of range: {}", i, val);
         }
