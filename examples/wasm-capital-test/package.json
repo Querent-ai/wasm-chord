@@ -1,0 +1,14 @@
+{
+  "name": "wasm-capital-test",
+  "version": "0.1.0",
+  "description": "WASM test for wasm-chord capital inference",
+  "type": "module",
+  "scripts": {
+    "build": "wasm-pack build --target web",
+    "serve": "python3 -m http.server 8080",
+    "test": "node test.js"
+  },
+  "keywords": ["wasm", "llm", "inference"],
+  "author": "wasm-chord",
+  "license": "MIT"
+}

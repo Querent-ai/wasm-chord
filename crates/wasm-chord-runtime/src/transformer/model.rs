@@ -1,7 +1,8 @@
 //! Complete transformer model implementation
 
-use rand::distributions::{Distribution, WeightedIndex};
-use rand::thread_rng;
+use rand::distr::weighted::WeightedIndex;
+use rand::distr::Distribution;
+use rand::rng;
 use wasm_chord_core::error::Result;
 use wasm_chord_core::Tokenizer;
 use wasm_chord_cpu::{matmul_f32_candle, matmul_transposed_candle, CandleTensorBackend};
@@ -116,17 +117,17 @@ fn matmul_naive(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> 
 #[allow(dead_code)]
 fn matmul_self_test() -> Result<()> {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     let tests = vec![(2, 3, 4), (4, 4, 4), (3, 5, 2)];
     for (m, k, n) in tests {
         let mut a = vec![0.0f32; m * k];
         let mut b = vec![0.0f32; k * n];
         for v in &mut a {
-            *v = rng.gen_range(-1.0..1.0);
+            *v = rng.random_range(-1.0..1.0);
         }
         for v in &mut b {
-            *v = rng.gen_range(-1.0..1.0);
+            *v = rng.random_range(-1.0..1.0);
         }
 
         let mut out = vec![0.0f32; m * n];
@@ -1148,7 +1149,7 @@ impl Model {
         }
 
         // Sample from filtered distribution using true randomness
-        let mut rng = thread_rng();
+        let mut rng = rng();
 
         // Convert probabilities to weights for weighted sampling
         // Filter out zero probabilities for efficiency

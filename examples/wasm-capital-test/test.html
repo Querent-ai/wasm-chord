@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WASM Capital Test - wasm-chord</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            border-left: 4px solid #4CAF50;
+        }
+        .status {
+            font-weight: bold;
+            padding: 8px 16px;
+            border-radius: 4px;
+            display: inline-block;
+            margin: 10px 0;
+        }
+        .status.loading {
+            background: #FFF3CD;
+            color: #856404;
+        }
+        .status.success {
+            background: #D4EDDA;
+            color: #155724;
+        }
+        .status.error {
+            background: #F8D7DA;
+            color: #721C24;
+        }
+        .response-box {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .info {
+            background: #E3F2FD;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+            border-left: 4px solid #2196F3;
+        }
+        .log {
+            background: #263238;
+            color: #ADBAC7;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 15px 0;
+        }
+        .log-entry {
+            margin: 5px 0;
+        }
+        .log-time {
+            color: #768390;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 WASM Capital Test</h1>
+        <div class="subtitle">Tests wasm-chord inference in the browser</div>
+
+        <div class="info">
+            <strong>Test Goal:</strong> Load the TinyLLaMA model and verify it correctly answers
+            "What is the capital of France?" with "Paris".
+        </div>
+
+        <div class="test-section">
+            <h3>Test Status</h3>
+            <div id="status" class="status loading">⏳ Waiting to start...</div>
+            <button id="runTest" onclick="runTest()">Run Test</button>
+            <button id="loadModel" onclick="loadModelOnly()" disabled>Load Model Only</button>
+        </div>
+
+        <div class="test-section">
+            <h3>Test Output</h3>
+            <div id="output">
+                <p>Click "Run Test" to begin...</p>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>Console Log</h3>
+            <div id="log" class="log">
+                <div class="log-entry"><span class="log-time">[00:00:00]</span> Ready to start test</div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import init, { test_capital_inference, get_test_info } from './pkg/wasm_capital_test.js';
+
+        let wasmInitialized = false;
+        let startTime;
+
+        function addLog(message) {
+            const log = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+
+            const elapsed = startTime ? Date.now() - startTime : 0;
+            const seconds = (elapsed / 1000).toFixed(2);
+            const timeStr = `[${seconds.padStart(8, '0')}s]`;
+
+            entry.innerHTML = `<span class="log-time">${timeStr}</span> ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function setStatus(text, type) {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.className = `status ${type}`;
+        }
+
+        async function initWasm() {
+            if (wasmInitialized) return;
+
+            addLog('Initializing WASM module...');
+            await init();
+            wasmInitialized = true;
+            addLog('✅ WASM module initialized');
+
+            const info = get_test_info();
+            addLog(`Module info: ${info}`);
+        }
+
+        async function loadModel() {
+            addLog('📥 Loading model file...');
+            addLog('⚠️  Note: This requires serving the model file. See README for instructions.');
+
+            // In a real deployment, you would fetch the model from a URL
+            // For this test, we expect the model to be served locally
+            const modelUrl = '/models/tinyllama-1.1b.Q4_K_M.gguf';
+
+            try {
+                const response = await fetch(modelUrl);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch model: ${response.statusText}`);
+                }
+
+                const contentLength = response.headers.get('content-length');
+                addLog(`Model size: ${(contentLength / 1024 / 1024).toFixed(2)} MB`);
+
+                addLog('⏳ Downloading model... (this may take a while)');
+                const modelBytes = new Uint8Array(await response.arrayBuffer());
+                addLog(`✅ Model downloaded: ${modelBytes.length} bytes`);
+
+                return modelBytes;
+            } catch (error) {
+                addLog(`❌ Error loading model: ${error.message}`);
+                throw error;
+            }
+        }
+
+        window.runTest = async function() {
+            startTime = Date.now();
+            const output = document.getElementById('output');
+            const runButton = document.getElementById('runTest');
+
+            runButton.disabled = true;
+            setStatus('⏳ Running test...', 'loading');
+            output.innerHTML = '<p>⏳ Initializing...</p>';
+
+            try {
+                // Initialize WASM
+                await initWasm();
+
+                // Load model
+                addLog('📦 Loading model...');
+                const modelBytes = await loadModel();
+
+                // Run inference test
+                addLog('🚀 Starting inference...');
+                setStatus('🚀 Running inference...', 'loading');
+
+                const result = await test_capital_inference(modelBytes);
+
+                addLog('✅ Inference complete');
+
+                // Display results
+                const prompt = result.prompt;
+                const response = result.response;
+                const success = result.success;
+
+                let html = `
+                    <div class="response-box">
+                        <strong>Prompt:</strong><br>${prompt}
+                    </div>
+                    <div class="response-box">
+                        <strong>Model Response:</strong><br>${response}
+                    </div>
+                `;
+
+                if (success) {
+                    html += `<div class="status success">✅ SUCCESS: Model correctly identified Paris!</div>`;
+                    setStatus('✅ Test Passed!', 'success');
+                    addLog('🎉 Test passed! Model output contains "Paris"');
+                } else {
+                    html += `<div class="status error">❌ FAILED: Expected "Paris" in response</div>`;
+                    setStatus('❌ Test Failed', 'error');
+                    addLog('⚠️  Test failed: Response does not contain "Paris"');
+                }
+
+                output.innerHTML = html;
+
+            } catch (error) {
+                console.error('Test error:', error);
+                addLog(`❌ Error: ${error.message}`);
+                setStatus('❌ Error', 'error');
+                output.innerHTML = `
+                    <div class="status error">
+                        ❌ Error: ${error.message}
+                    </div>
+                    <p>See console for details.</p>
+                `;
+            } finally {
+                runButton.disabled = false;
+            }
+        };
+
+        window.loadModelOnly = async function() {
+            const loadButton = document.getElementById('loadModel');
+            loadButton.disabled = true;
+
+            try {
+                await initWasm();
+                await loadModel();
+                addLog('✅ Model loaded successfully (no inference run)');
+            } catch (error) {
+                addLog(`❌ Error: ${error.message}`);
+            } finally {
+                loadButton.disabled = false;
+            }
+        };
+
+        // Auto-initialize on load
+        (async () => {
+            try {
+                addLog('Page loaded');
+                document.getElementById('loadModel').disabled = false;
+            } catch (error) {
+                addLog(`❌ Initialization error: ${error.message}`);
+            }
+        })();
+    </script>
+</body>
+</html>

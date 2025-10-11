@@ -1,0 +1,214 @@
+# WASM Capital Test
+
+This example demonstrates running wasm-chord inference in the browser to test the model's ability to answer "What is the capital of France?" with "Paris".
+
+## Features
+
+- **Pure Browser Execution**: Runs TinyLLaMA 1.1B entirely in the browser
+- **Two Implementations**:
+  - `test.html`: Custom WASM module with dedicated test function
+  - `test-runtime.html`: Uses WasmModel API from wasm-chord-runtime
+- **Interactive UI**: Load models, configure generation, and test inference
+
+## Building
+
+Build the WASM module:
+
+```bash
+cd examples/wasm-capital-test
+wasm-pack build --target web
+```
+
+This generates files in `pkg/`:
+- `wasm_capital_test_bg.wasm` - WebAssembly binary
+- `wasm_capital_test.js` - JavaScript bindings
+- `wasm_capital_test.d.ts` - TypeScript definitions
+
+## Running
+
+You need to serve the files with a local HTTP server (WASM cannot be loaded from `file://`).
+
+### Option 1: Python HTTP Server
+
+```bash
+# From the examples/wasm-capital-test directory
+python3 -m http.server 8080
+```
+
+Then open: http://localhost:8080/test.html
+
+### Option 2: Node.js HTTP Server
+
+```bash
+npx http-server -p 8080
+```
+
+Then open: http://localhost:8080/test.html
+
+### Option 3: Using the Runtime Test
+
+For `test-runtime.html`, you need to build the wasm-chord-runtime package:
+
+```bash
+# From project root
+cd crates/wasm-chord-runtime
+wasm-pack build --target web --out-dir pkg
+
+# Then serve from examples/wasm-capital-test
+cd ../../examples/wasm-capital-test
+python3 -m http.server 8080
+```
+
+Open: http://localhost:8080/test-runtime.html
+
+## Providing the Model
+
+The test requires the TinyLLaMA model to be available at `/models/tinyllama-1.1b.Q4_K_M.gguf`.
+
+### Option 1: Symlink (Development)
+
+From the `examples/wasm-capital-test` directory:
+
+```bash
+mkdir -p models
+ln -s ~/.ollama/models/tinyllama-1.1b.Q4_K_M.gguf models/
+```
+
+### Option 2: Copy Model
+
+```bash
+mkdir -p models
+cp ~/.ollama/models/tinyllama-1.1b.Q4_K_M.gguf models/
+```
+
+### Option 3: Serve from Different Location
+
+Edit the HTML files and change the `modelUrl` variable:
+
+```javascript
+const modelUrl = 'http://localhost:8080/path/to/model.gguf';
+```
+
+## API Reference
+
+### test.html API
+
+Uses the custom WASM module:
+
+```javascript
+import init, { test_capital_inference, get_test_info } from './pkg/wasm_capital_test.js';
+
+// Initialize WASM
+await init();
+
+// Get module info
+const info = get_test_info();
+console.log(info);
+
+// Run inference test
+const modelBytes = new Uint8Array(await fetch('/models/model.gguf').then(r => r.arrayBuffer()));
+const result = await test_capital_inference(modelBytes);
+
+console.log(result.prompt);    // "What is the capital of France?"
+console.log(result.response);  // Model's response
+console.log(result.success);   // true if contains "Paris"
+```
+
+### test-runtime.html API
+
+Uses WasmModel from wasm-chord-runtime:
+
+```javascript
+import init, { WasmModel } from '../../crates/wasm-chord-runtime/pkg/wasm_chord_runtime.js';
+
+// Initialize
+await init();
+
+// Load model
+const modelBytes = new Uint8Array(...);
+const model = new WasmModel(modelBytes);
+
+// Configure generation
+model.set_config(
+    20,   // max_tokens
+    0.0,  // temperature (greedy)
+    1.0,  // top_p
+    0,    // top_k
+    1.0   // repetition_penalty
+);
+
+// Generate (blocking)
+const response = model.generate("What is the capital of France?");
+
+// Generate (streaming)
+model.generate_stream(prompt, (token) => {
+    console.log(token); // Called for each token
+    return true; // Continue generation
+});
+```
+
+## Test Expectations
+
+- **Prompt**: "What is the capital of France?"
+- **Expected Response**: Should contain the word "Paris"
+- **Configuration**: Greedy decoding (temperature=0.0) for deterministic output
+- **Max Tokens**: 20 tokens
+
+## Performance Notes
+
+- **Model Size**: ~670 MB (TinyLLaMA 1.1B Q4_K_M)
+- **Download Time**: Varies based on connection (1-5 minutes)
+- **Initialization**: ~5-10 seconds to parse GGUF and load weights
+- **Inference Speed**: Varies by browser (5-20 tokens/sec typical)
+
+Best performance in:
+- Chrome/Edge (V8 engine with WASM optimizations)
+- Firefox (SpiderMonkey with good WASM support)
+
+## Known Issues
+
+### Node.js Runtime
+
+The Node.js test currently encounters a runtime error during inference. This is being investigated. The recommended testing environment is the browser where all WASM bindings are properly supported.
+
+**Workaround**: Use the browser tests (`test.html` or `test-runtime.html`) which work correctly.
+
+## Troubleshooting
+
+### "Failed to fetch model"
+
+- Ensure you're running a local HTTP server
+- Check that the model file exists at the specified path
+- Verify CORS headers allow loading the model
+
+### "WASM initialization failed"
+
+- Make sure you built with `wasm-pack build`
+- Check browser console for detailed errors
+- Try clearing browser cache
+
+### "Module not found"
+
+- Ensure the `pkg/` directory was generated by wasm-pack
+- Check that the import paths in HTML match the file structure
+
+### Slow Performance
+
+- Use a modern browser (Chrome, Firefox, Edge)
+- Ensure hardware acceleration is enabled
+- Consider using a smaller model for testing
+
+## CI Integration
+
+This example is built and tested in CI:
+
+```yaml
+- name: Build WASM capital test example
+  run: |
+    cd examples/wasm-capital-test
+    wasm-pack build --target web
+```
+
+## License
+
+Same as wasm-chord project.

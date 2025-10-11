@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WASM Runtime Test - wasm-chord</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            border-left: 4px solid #4CAF50;
+        }
+        .status {
+            font-weight: bold;
+            padding: 8px 16px;
+            border-radius: 4px;
+            display: inline-block;
+            margin: 10px 0;
+        }
+        .status.loading {
+            background: #FFF3CD;
+            color: #856404;
+        }
+        .status.success {
+            background: #D4EDDA;
+            color: #155724;
+        }
+        .status.error {
+            background: #F8D7DA;
+            color: #721C24;
+        }
+        .response-box {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 10px 5px 10px 0;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .info {
+            background: #E3F2FD;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+            border-left: 4px solid #2196F3;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 WASM Runtime Test</h1>
+        <div class="subtitle">Tests wasm-chord-runtime WasmModel API</div>
+
+        <div class="info">
+            <strong>About:</strong> This test uses the WasmModel API from wasm-chord-runtime.
+            Enter a prompt and generate text using TinyLLaMA running entirely in your browser!
+        </div>
+
+        <div class="test-section">
+            <h3>Model Status</h3>
+            <div id="status" class="status loading">⏳ Not loaded</div>
+            <button id="loadBtn" onclick="loadModel()">Load Model</button>
+        </div>
+
+        <div class="test-section" id="promptSection" style="display: none;">
+            <h3>Text Generation</h3>
+            <label for="prompt"><strong>Enter Prompt:</strong></label>
+            <input type="text" id="prompt" value="What is the capital of France?"
+                   placeholder="Enter your prompt here...">
+
+            <div style="margin: 15px 0;">
+                <strong>Configuration:</strong><br>
+                <label>Max Tokens: <input type="number" id="maxTokens" value="20" style="width: 100px;"></label>
+                <label>Temperature: <input type="number" id="temperature" value="0.0" step="0.1" style="width: 100px;"></label>
+            </div>
+
+            <button onclick="generate()">Generate</button>
+            <button onclick="generateStream()">Generate (Streaming)</button>
+            <button onclick="testCapital()">🧪 Test Capital Question</button>
+        </div>
+
+        <div class="test-section">
+            <h3>Output</h3>
+            <div id="output" class="response-box" style="min-height: 100px;">
+                Waiting for input...
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Import from wasm-chord-runtime package
+        import init, { WasmModel, version } from '../../crates/wasm-chord-runtime/pkg/wasm_chord_runtime.js';
+
+        let model = null;
+        let wasmInitialized = false;
+
+        function setStatus(text, type) {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.className = `status ${type}`;
+        }
+
+        function setOutput(text) {
+            document.getElementById('output').textContent = text;
+        }
+
+        function appendOutput(text) {
+            const output = document.getElementById('output');
+            output.textContent += text;
+        }
+
+        async function initWasm() {
+            if (wasmInitialized) return;
+            await init();
+            wasmInitialized = true;
+            console.log('WASM initialized, version:', version());
+        }
+
+        window.loadModel = async function() {
+            const btn = document.getElementById('loadBtn');
+            btn.disabled = true;
+            setStatus('⏳ Loading WASM...', 'loading');
+
+            try {
+                await initWasm();
+
+                setStatus('📥 Downloading model...', 'loading');
+                setOutput('Downloading model (this may take a while for ~670MB file)...');
+
+                // Fetch model
+                const modelUrl = '/models/tinyllama-1.1b.Q4_K_M.gguf';
+                const response = await fetch(modelUrl);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const modelBytes = new Uint8Array(await response.arrayBuffer());
+                console.log('Model downloaded:', modelBytes.length, 'bytes');
+
+                setStatus('🔧 Loading model...', 'loading');
+                setOutput('Parsing GGUF and loading weights...');
+
+                // Create model
+                model = new WasmModel(modelBytes);
+
+                // Configure generation
+                model.set_config(
+                    20,   // max_tokens
+                    0.0,  // temperature (greedy)
+                    1.0,  // top_p
+                    0,    // top_k
+                    1.0   // repetition_penalty
+                );
+
+                setStatus('✅ Model Ready', 'success');
+                setOutput('Model loaded successfully! Ready for generation.');
+
+                // Show prompt section
+                document.getElementById('promptSection').style.display = 'block';
+
+            } catch (error) {
+                console.error('Error loading model:', error);
+                setStatus('❌ Error', 'error');
+                setOutput(`Error: ${error.message}\n\nMake sure:\n1. The model file is available at /models/tinyllama-1.1b.Q4_K_M.gguf\n2. You're running a local server (not file://)\n3. CORS is properly configured`);
+                btn.disabled = false;
+            }
+        };
+
+        window.generate = async function() {
+            if (!model) {
+                alert('Please load the model first');
+                return;
+            }
+
+            const prompt = document.getElementById('prompt').value;
+            const maxTokens = parseInt(document.getElementById('maxTokens').value);
+            const temperature = parseFloat(document.getElementById('temperature').value);
+
+            try {
+                setOutput('Generating...');
+
+                // Update config
+                model.set_config(maxTokens, temperature, 1.0, 0, 1.0);
+
+                const start = Date.now();
+                const response = model.generate(prompt);
+                const elapsed = Date.now() - start;
+
+                setOutput(`Prompt: ${prompt}\n\n` +
+                         `Response: ${response}\n\n` +
+                         `Time: ${elapsed}ms`);
+
+            } catch (error) {
+                console.error('Generation error:', error);
+                setOutput(`Error: ${error.message}`);
+            }
+        };
+
+        window.generateStream = async function() {
+            if (!model) {
+                alert('Please load the model first');
+                return;
+            }
+
+            const prompt = document.getElementById('prompt').value;
+            const maxTokens = parseInt(document.getElementById('maxTokens').value);
+            const temperature = parseFloat(document.getElementById('temperature').value);
+
+            try {
+                setOutput(`Generating (streaming)...\n\nPrompt: ${prompt}\n\nResponse: `);
+
+                // Update config
+                model.set_config(maxTokens, temperature, 1.0, 0, 1.0);
+
+                const start = Date.now();
+
+                // Use streaming generation
+                const response = model.generate_stream(prompt, (token) => {
+                    appendOutput(token);
+                    return true; // continue generation
+                });
+
+                const elapsed = Date.now() - start;
+                appendOutput(`\n\nTime: ${elapsed}ms`);
+
+            } catch (error) {
+                console.error('Streaming error:', error);
+                setOutput(`Error: ${error.message}`);
+            }
+        };
+
+        window.testCapital = async function() {
+            if (!model) {
+                alert('Please load the model first');
+                return;
+            }
+
+            try {
+                setOutput('🧪 Running capital test...');
+
+                // Set greedy config
+                model.set_config(20, 0.0, 1.0, 0, 1.0);
+
+                const prompt = "What is the capital of France?";
+                const response = model.generate(prompt);
+
+                const success = response.toLowerCase().includes('paris');
+
+                setOutput(
+                    `🧪 Capital Test\n\n` +
+                    `Prompt: ${prompt}\n\n` +
+                    `Response: ${response}\n\n` +
+                    `Result: ${success ? '✅ PASS - Contains "Paris"' : '❌ FAIL - Does not contain "Paris"'}`
+                );
+
+            } catch (error) {
+                console.error('Test error:', error);
+                setOutput(`Error: ${error.message}`);
+            }
+        };
+
+        // Show version on load
+        setOutput(`wasm-chord-runtime ready\nClick "Load Model" to begin`);
+    </script>
+</body>
+</html>

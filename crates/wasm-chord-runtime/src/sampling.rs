@@ -6,7 +6,9 @@
 //!
 //! Inspired by Candle's logits processor implementation.
 
-use rand::{distributions::WeightedIndex, prelude::Distribution, SeedableRng};
+use rand::distr::weighted::WeightedIndex;
+use rand::distr::Distribution;
+use rand::SeedableRng;
 
 /// Sampling strategy for text generation
 #[derive(Clone, PartialEq, Debug)]

@@ -3,7 +3,6 @@
 //! Provides both C ABI and wasm-bindgen interfaces for host integration.
 
 mod abi;
-mod cache;
 mod chat;
 mod context;
 mod inference;
@@ -19,11 +18,6 @@ mod transformer;
 mod web;
 
 pub use abi::*;
-#[cfg(not(target_arch = "wasm32"))]
-pub use cache::FileSystemCache;
-#[cfg(target_arch = "wasm32")]
-pub use cache::IndexedDBCache;
-pub use cache::{CacheBackend, CacheKey, ModelCache};
 pub use chat::{ChatMessage, ChatRole, ChatTemplate};
 pub use context::RuntimeContext;
 pub use inference::{GenOptions, GenerationState, InferenceSession};
