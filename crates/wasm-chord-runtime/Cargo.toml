@@ -39,6 +39,7 @@ wasm-bindgen-futures = "0.4"
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
 criterion = { workspace = true }
+half = { workspace = true }
 
 [features]
 default = []

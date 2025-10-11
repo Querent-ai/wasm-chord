@@ -200,7 +200,7 @@ impl MultiHeadAttention {
     /// * `start_pos` - Starting position in the sequence
     /// * `seq_len` - Number of tokens in this batch
     /// * `num_heads` - Number of heads (num_heads for Q, num_kv_heads for K/V)
-    fn apply_rope(
+    pub fn apply_rope(
         &self,
         tensor: &mut [f32],
         start_pos: usize,

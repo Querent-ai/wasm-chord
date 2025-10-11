@@ -245,6 +245,11 @@ mod tests {
         // RMS norm should reduce the magnitude
         let input_rms: f32 = [1.0f32, 2.0, 3.0, 4.0].iter().map(|x| x * x).sum::<f32>().sqrt();
         let output_rms: f32 = result_vec.iter().map(|x| x * x).sum::<f32>().sqrt();
-        assert!(output_rms < input_rms * 2.0, "Output RMS {} not reasonable compared to input RMS {}", output_rms, input_rms);
+        assert!(
+            output_rms < input_rms * 2.0,
+            "Output RMS {} not reasonable compared to input RMS {}",
+            output_rms,
+            input_rms
+        );
     }
 }
