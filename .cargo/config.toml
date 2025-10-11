@@ -1,0 +1,9 @@
+# Cargo configuration for wasm-chord
+
+# Enable getrandom's wasm_js backend for wasm32 targets
+# This is required for rand/getrandom to work in WebAssembly
+[target.wasm32-unknown-unknown]
+rustflags = [
+    "--cfg", "getrandom_backend=\"wasm_js\"",
+    "--cfg", "feature=\"wasm_js\""
+]

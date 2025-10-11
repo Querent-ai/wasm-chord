@@ -83,15 +83,26 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - name: Build WASM
+      - name: Build WASM runtime
         run: |
           cd crates/wasm-chord-runtime
           wasm-pack build --target web --out-dir pkg
 
-      - name: Verify artifacts
+      - name: Verify runtime artifacts
         run: |
           test -f crates/wasm-chord-runtime/pkg/wasm_chord_runtime_bg.wasm
           test -f crates/wasm-chord-runtime/pkg/wasm_chord_runtime.js
+
+      - name: Build WASM capital test example
+        run: |
+          cd examples/wasm-capital-test
+          wasm-pack build --target web
+
+      - name: Verify example artifacts
+        run: |
+          test -f examples/wasm-capital-test/pkg/wasm_capital_test_bg.wasm
+          test -f examples/wasm-capital-test/pkg/wasm_capital_test.js
+          echo "✅ WASM build successful!"
 
   examples:
     name: Build Examples
