@@ -1,9 +1,13 @@
 //! WebGPU backend for wasm-chord
 //!
-//! Provides GPU-accelerated compute kernels using WebGPU/wgpu.
+//! Provides GPU-accelerated compute kernels using WebGPU/wgpu and Candle.
 
 use wasm_chord_core::error::{Error, Result};
 use wgpu::util::DeviceExt;
+
+// Export Candle GPU backend (available with cuda/metal features)
+pub mod candle_backend;
+pub use candle_backend::CandleGpuBackend;
 
 /// GPU backend for accelerated inference
 pub struct GpuBackend {

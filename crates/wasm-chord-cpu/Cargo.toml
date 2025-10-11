@@ -19,8 +19,13 @@ candle-nn = { workspace = true }
 
 [features]
 default = []
-cuda = ["candle-core/cuda"]
-metal = ["candle-core/metal"]
+gpu = ["wasm-chord-gpu"]
+cuda = ["candle-core/cuda", "gpu", "wasm-chord-gpu/cuda"]
+metal = ["candle-core/metal", "gpu", "wasm-chord-gpu/metal"]
+
+[dependencies.wasm-chord-gpu]
+workspace = true
+optional = true
 
 [dev-dependencies]
 criterion = { workspace = true }

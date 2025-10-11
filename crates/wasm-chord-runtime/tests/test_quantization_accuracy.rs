@@ -4,31 +4,8 @@
 /// Tests that quantization->dequantization produces acceptable error rates
 use wasm_chord_core::quant::*;
 
-/// Maximum acceptable RMSE for standard quantization formats
-const MAX_QUANTIZATION_ERROR: f32 = 0.002;
-const MAX_QUANTIZATION_ERROR_LOWBIT: f32 = 0.01;
-
-/// Calculate Root Mean Square Error between two float arrays
-fn array_rmse(a1: &[f32], a2: &[f32]) -> f32 {
-    assert_eq!(a1.len(), a2.len(), "Arrays must have same length");
-
-    let sum: f32 = a1.iter().zip(a2.iter()).map(|(x, y)| (x - y).powi(2)).sum();
-
-    (sum / a1.len() as f32).sqrt()
-}
-
-/// Generate synthetic test data using cosine function (like llama.cpp)
-/// This creates a smooth but varied dataset good for testing quantization
-fn generate_test_data(offset: f32, n: usize) -> Vec<f32> {
-    (0..n).map(|i| 0.1 + 2.0 * ((i as f32) + offset).cos()).collect()
-}
-
 #[test]
 fn test_q4_k_dequantization_accuracy() {
-    // Generate synthetic test data
-    let test_size = 256;
-    let test_data = generate_test_data(0.0, test_size);
-
     // For this test, we only verify dequantization works
     // (We don't have quantization functions yet, just using example blocks)
 
@@ -56,8 +33,6 @@ fn test_q4_k_dequantization_accuracy() {
 
 #[test]
 fn test_q6_k_dequantization_accuracy() {
-    let test_size = 256;
-
     // Create a block with known pattern
     let mut block = BlockQ6_K {
         ql: [0u8; QK_K / 2],
@@ -87,8 +62,6 @@ fn test_q6_k_dequantization_accuracy() {
 
 #[test]
 fn test_q8_k_dequantization_accuracy() {
-    let test_size = 256;
-
     // Create a Q8_K block with test values
     let mut block = BlockQ8_K {
         quants: [0i8; QK_K],

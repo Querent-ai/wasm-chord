@@ -22,7 +22,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 wasm-chord-core = { workspace = true }
 wasm-chord-cpu = { workspace = true }
-wasm-chord-gpu = { workspace = true, optional = true }
+wasm-chord-gpu = { workspace = true }
 wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }
 serde = { workspace = true }
@@ -43,7 +43,7 @@ half = { workspace = true }
 
 [features]
 default = []
-gpu = ["wasm-chord-gpu", "pollster"]
+gpu = ["wasm-chord-gpu/default", "pollster"]
 memory64 = []
 
 [[bench]]

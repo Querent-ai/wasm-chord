@@ -17,6 +17,8 @@ jobs:
     strategy:
       matrix:
         rust: [stable]
+    env:
+      WASM_CHORD_TEST_MODEL: /tmp/wasm-chord-models/tinyllama-1.1b.Q4_K_M.gguf
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +33,22 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache test model
+        id: cache-model
+        uses: actions/cache@v3
+        with:
+          path: /tmp/wasm-chord-models
+          key: ${{ runner.os }}-tinyllama-1.1b-q4km-v1
+
+      - name: Download test model
+        if: steps.cache-model.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/wasm-chord-models
+          echo "📥 Downloading TinyLLaMA model..."
+          wget -O /tmp/wasm-chord-models/tinyllama-1.1b.Q4_K_M.gguf \
+            https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+          ls -lh /tmp/wasm-chord-models/
 
       - name: Run tests
         run: cargo test --verbose --workspace

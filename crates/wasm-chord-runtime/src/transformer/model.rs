@@ -4,10 +4,8 @@ use rand::distributions::{Distribution, WeightedIndex};
 use rand::thread_rng;
 use wasm_chord_core::error::Result;
 use wasm_chord_core::Tokenizer;
-use wasm_chord_cpu::{
-    candle_gpu_backend::CandleGpuBackend, matmul_f32_candle, matmul_transposed_candle,
-    CandleTensorBackend,
-};
+use wasm_chord_cpu::{matmul_f32_candle, matmul_transposed_candle, CandleTensorBackend};
+use wasm_chord_gpu::CandleGpuBackend;
 
 #[cfg(feature = "gpu")]
 use wasm_chord_gpu::GpuBackend;

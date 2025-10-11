@@ -183,7 +183,6 @@ fn test_rope_multi_token_sequence() {
 fn test_rope_interleaved_pairs() {
     // Verify RoPE uses interleaved pairing: (0,1), (2,3), (4,5), ...
     let config = test_config();
-    let attn = MultiHeadAttention::new(config.clone());
 
     let head_dim = 8; // Small for easier verification
     let mut config_small = config;

@@ -1,0 +1,12 @@
+[package]
+name = "test-capital-cpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wasm-chord-core = { path = "../../crates/wasm-chord-core" }
+wasm-chord-runtime = { path = "../../crates/wasm-chord-runtime" }
+wasm-chord-cpu = { path = "../../crates/wasm-chord-cpu" }
+anyhow = "1.0"
+
+[workspace]

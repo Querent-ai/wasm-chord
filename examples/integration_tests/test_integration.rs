@@ -7,17 +7,22 @@ use std::io::BufReader;
 use wasm_chord_core::{GGUFParser, Tokenizer};
 use wasm_chord_runtime::TransformerConfig;
 
+/// Get test model path from environment or default location
+fn get_test_model_path() -> String {
+    std::env::var("WASM_CHORD_TEST_MODEL")
+        .unwrap_or_else(|_| "/home/puneet/.ollama/models/tinyllama-1.1b.Q4_K_M.gguf".to_string())
+}
+
 /// Load reference data from JSON file
 fn load_reference_data() -> serde_json::Value {
-    let file = File::open("/home/puneet/wasm-chord/reference_data.json")
-        .expect("Failed to open reference data file");
+    let file = File::open("reference_data.json").expect("Failed to open reference data file");
     let reader = BufReader::new(file);
     serde_json::from_reader(reader).expect("Failed to parse reference data")
 }
 
 /// Load model configuration and tokenizer for testing
 fn load_test_config() -> (Tokenizer, TransformerConfig) {
-    let model_path = "/home/puneet/.ollama/models/tinyllama-1.1b.Q4_K_M.gguf";
+    let model_path = get_test_model_path();
 
     // Load GGUF file
     let file = File::open(model_path).expect("Failed to open model file");
