@@ -3,7 +3,7 @@
 use wasm_chord_core::error::Result;
 use wasm_chord_cpu::{matmul_f32, matmul_transposed};
 
-#[cfg(feature = "gpu")]
+#[cfg(feature = "webgpu")]
 use wasm_chord_gpu::GpuBackend;
 
 use super::{KVCache, TransformerConfig};
@@ -32,9 +32,9 @@ impl MultiHeadAttention {
         k: usize,
         n: usize,
         transposed_b: bool,
-        #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
+        #[cfg(feature = "webgpu")] gpu: Option<&GpuBackend>,
     ) -> Result<Vec<f32>> {
-        #[cfg(feature = "gpu")]
+        #[cfg(feature = "webgpu")]
         if let Some(gpu) = gpu {
             if !transposed_b {
                 if let Ok(result) = gpu.matmul(a, b, m as u32, k as u32, n as u32) {
@@ -70,7 +70,7 @@ impl MultiHeadAttention {
         weights: &AttentionWeights,
         kv_cache: &mut KVCache,
         position: usize,
-        #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
+        #[cfg(feature = "webgpu")] gpu: Option<&GpuBackend>,
     ) -> Result<Vec<f32>> {
         let seq_len = hidden_states.len() / self.config.hidden_size;
         let hidden_size = self.config.hidden_size;
@@ -84,7 +84,7 @@ impl MultiHeadAttention {
             hidden_size,
             hidden_size,
             true, // FIXED: GGUF stores weights in transposed format
-            #[cfg(feature = "gpu")]
+            #[cfg(feature = "webgpu")]
             gpu,
         )?;
 
@@ -112,7 +112,7 @@ impl MultiHeadAttention {
             hidden_size,
             self.config.num_kv_heads * self.head_dim,
             true, // FIXED: GGUF stores weights in transposed format
-            #[cfg(feature = "gpu")]
+            #[cfg(feature = "webgpu")]
             gpu,
         )?;
 
@@ -124,7 +124,7 @@ impl MultiHeadAttention {
             hidden_size,
             self.config.num_kv_heads * self.head_dim,
             true, // FIXED: GGUF stores weights in transposed format
-            #[cfg(feature = "gpu")]
+            #[cfg(feature = "webgpu")]
             gpu,
         )?;
 
@@ -186,7 +186,7 @@ impl MultiHeadAttention {
             hidden_size,
             hidden_size,
             true, // FIXED: GGUF stores weights in transposed format
-            #[cfg(feature = "gpu")]
+            #[cfg(feature = "webgpu")]
             gpu,
         )?;
 

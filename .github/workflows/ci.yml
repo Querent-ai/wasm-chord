@@ -118,10 +118,10 @@ jobs:
           cargo build --release --manifest-path examples/chat-streaming/Cargo.toml
           cargo build --release --manifest-path examples/benchmark/Cargo.toml
 
-      - name: Build examples (with GPU feature)
+      - name: Build examples (with WebGPU feature)
         run: |
           cargo build --release --manifest-path examples/gpu-generation/Cargo.toml
-          cargo build --release --features gpu --manifest-path examples/benchmark/Cargo.toml
+          cargo build --release --features webgpu --manifest-path examples/benchmark/Cargo.toml
 
   docs:
     name: Documentation

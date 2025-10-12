@@ -19,4 +19,4 @@ pollster = { version = "0.3", optional = true }
 
 [features]
 default = []
-gpu = ["wasm-chord-gpu", "pollster", "wasm-chord-runtime/gpu"]
+webgpu = ["wasm-chord-gpu", "pollster", "wasm-chord-runtime/webgpu"]

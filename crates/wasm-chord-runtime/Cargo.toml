@@ -22,7 +22,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 wasm-chord-core = { workspace = true }
 wasm-chord-cpu = { workspace = true }
-wasm-chord-gpu = { workspace = true }
+wasm-chord-gpu = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }
 serde = { workspace = true }
@@ -43,8 +43,10 @@ criterion = { workspace = true }
 half = { workspace = true }
 
 [features]
-default = []
-gpu = ["wasm-chord-gpu/default", "pollster"]
+default = []  # CPU-only by default (smallest, works everywhere)
+cuda = ["dep:wasm-chord-gpu", "wasm-chord-gpu/cuda"]  # Candle GPU with CUDA (NVIDIA)
+metal = ["dep:wasm-chord-gpu", "wasm-chord-gpu/metal"]  # Candle GPU with Metal (Apple)
+webgpu = ["dep:wasm-chord-gpu", "wasm-chord-gpu/default", "pollster"]  # WebGPU for browsers
 memory64 = []
 
 [[bench]]

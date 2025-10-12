@@ -118,7 +118,7 @@ impl WasmModel {
     }
 
     /// Initialize GPU backend (if available)
-    #[cfg(feature = "gpu")]
+    #[cfg(feature = "webgpu")]
     pub fn init_gpu(&mut self) -> Result<(), JsValue> {
         self.model
             .init_gpu()

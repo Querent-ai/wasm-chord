@@ -13,4 +13,6 @@ wasm-chord-runtime.workspace = true
 
 [features]
 default = []
-gpu = ["wasm-chord-runtime/gpu"]
+cuda = ["wasm-chord-runtime/cuda"]
+metal = ["wasm-chord-runtime/metal"]
+webgpu = ["wasm-chord-runtime/webgpu"]

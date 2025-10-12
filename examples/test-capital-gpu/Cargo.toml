@@ -6,13 +6,11 @@ edition = "2021"
 [dependencies]
 wasm-chord-core = { path = "../../crates/wasm-chord-core" }
 wasm-chord-runtime = { path = "../../crates/wasm-chord-runtime" }
-wasm-chord-cpu = { path = "../../crates/wasm-chord-cpu", features = ["gpu"] }
-wasm-chord-gpu = { path = "../../crates/wasm-chord-gpu" }
 anyhow = "1.0"
 
 [features]
 default = []
-cuda = ["wasm-chord-cpu/cuda", "wasm-chord-gpu/cuda"]
-metal = ["wasm-chord-cpu/metal", "wasm-chord-gpu/metal"]
+cuda = ["wasm-chord-runtime/cuda"]
+metal = ["wasm-chord-runtime/metal"]
 
 [workspace]

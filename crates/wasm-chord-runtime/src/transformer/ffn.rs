@@ -3,7 +3,7 @@
 use wasm_chord_core::error::Result;
 use wasm_chord_cpu::{matmul_f32, matmul_transposed};
 
-#[cfg(feature = "gpu")]
+#[cfg(feature = "webgpu")]
 use wasm_chord_gpu::GpuBackend;
 
 use super::TransformerConfig;
@@ -30,9 +30,9 @@ impl FeedForward {
         k: usize,
         n: usize,
         transposed_b: bool,
-        #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
+        #[cfg(feature = "webgpu")] gpu: Option<&GpuBackend>,
     ) -> Result<Vec<f32>> {
-        #[cfg(feature = "gpu")]
+        #[cfg(feature = "webgpu")]
         if let Some(gpu) = gpu {
             if !transposed_b {
                 if let Ok(result) = gpu.matmul(a, b, m as u32, k as u32, n as u32) {
@@ -55,7 +55,7 @@ impl FeedForward {
         &self,
         hidden_states: &[f32],
         weights: &FFNWeights,
-        #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
+        #[cfg(feature = "webgpu")] gpu: Option<&GpuBackend>,
     ) -> Result<Vec<f32>> {
         let seq_len = hidden_states.len() / self.config.hidden_size;
         let hidden_size = self.config.hidden_size;
@@ -69,7 +69,7 @@ impl FeedForward {
             hidden_size,
             intermediate_size,
             true,
-            #[cfg(feature = "gpu")]
+            #[cfg(feature = "webgpu")]
             gpu,
         )?;
 
@@ -81,7 +81,7 @@ impl FeedForward {
             hidden_size,
             intermediate_size,
             true,
-            #[cfg(feature = "gpu")]
+            #[cfg(feature = "webgpu")]
             gpu,
         )?;
 
@@ -101,7 +101,7 @@ impl FeedForward {
             intermediate_size,
             hidden_size,
             true,
-            #[cfg(feature = "gpu")]
+            #[cfg(feature = "webgpu")]
             gpu,
         )?;
 

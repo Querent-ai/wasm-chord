@@ -3,7 +3,7 @@
 use wasm_chord_core::error::Result;
 use wasm_chord_cpu::CandleTensorBackend;
 
-#[cfg(feature = "gpu")]
+#[cfg(feature = "webgpu")]
 use wasm_chord_gpu::GpuBackend;
 
 use super::{
@@ -40,17 +40,8 @@ impl TransformerLayer {
         kv_cache: &mut KVCache,
         position: usize,
         candle_backend: &CandleTensorBackend,
-        #[cfg(feature = "gpu")] gpu: Option<&GpuBackend>,
+        #[cfg(feature = "webgpu")] gpu: Option<&GpuBackend>,
     ) -> Result<Vec<f32>> {
-        // DEBUG: Dump layer input for layer 0
-        if std::env::var("DUMP_LAYER0").is_ok() {
-            eprintln!(
-                "LAYER {} input hidden_states preview: {:?}",
-                0,
-                &hidden_states[..hidden_states.len().min(16)]
-            );
-        }
-
         // Pre-norm architecture (like LLaMA)
 
         // Calculate sequence length from input dimensions
@@ -69,7 +60,7 @@ impl TransformerLayer {
             &self.attention_weights,
             kv_cache,
             position,
-            #[cfg(feature = "gpu")]
+            #[cfg(feature = "webgpu")]
             gpu,
         )?;
 
@@ -87,7 +78,7 @@ impl TransformerLayer {
         let ffn_output = self.ffn.forward(
             &normed,
             &self.ffn_weights,
-            #[cfg(feature = "gpu")]
+            #[cfg(feature = "webgpu")]
             gpu,
         )?;
 

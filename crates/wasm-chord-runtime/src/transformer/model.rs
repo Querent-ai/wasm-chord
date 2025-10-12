@@ -6,9 +6,11 @@ use rand::rng;
 use wasm_chord_core::error::Result;
 use wasm_chord_core::Tokenizer;
 use wasm_chord_cpu::{matmul_f32_candle, matmul_transposed_candle, CandleTensorBackend};
+
+#[cfg(any(feature = "cuda", feature = "metal"))]
 use wasm_chord_gpu::CandleGpuBackend;
 
-#[cfg(feature = "gpu")]
+#[cfg(feature = "webgpu")]
 use wasm_chord_gpu::GpuBackend;
 
 use super::{GenerationConfig, KVCache, TransformerConfig, TransformerLayer};
@@ -28,12 +30,13 @@ pub struct Model {
     pub lm_head: Vec<f32>,
     /// KV caches for each layer
     pub kv_caches: Vec<KVCache>,
-    /// GPU backend (optional, enabled with "gpu" feature)
-    #[cfg(feature = "gpu")]
+    /// WebGPU backend (optional, enabled with "webgpu" feature for browsers)
+    #[cfg(feature = "webgpu")]
     gpu: Option<GpuBackend>,
-    /// Candle tensor backend for optimized operations
+    /// Candle tensor backend for optimized CPU operations
     candle_backend: CandleTensorBackend,
-    /// GPU backend for accelerated operations (optional)
+    /// Candle GPU backend for native GPU acceleration (optional, enabled with "cuda" or "metal" features)
+    #[cfg(any(feature = "cuda", feature = "metal"))]
     gpu_backend: Option<CandleGpuBackend>,
 }
 
@@ -196,15 +199,16 @@ impl Model {
             kv_caches,
             layers,
             config,
-            #[cfg(feature = "gpu")]
-            gpu: None,
+            #[cfg(feature = "webgpu")]
+            gpu: None, // WebGPU must be initialized with init_gpu() due to async requirement
             candle_backend: CandleTensorBackend::new(),
+            #[cfg(any(feature = "cuda", feature = "metal"))]
             gpu_backend: CandleGpuBackend::new().ok(),
         }
     }
 
     /// Initialize GPU backend (if feature enabled)
-    #[cfg(feature = "gpu")]
+    #[cfg(feature = "webgpu")]
     pub fn init_gpu(&mut self) -> Result<()> {
         if GpuBackend::is_available() {
             match pollster::block_on(GpuBackend::new()) {
@@ -224,7 +228,8 @@ impl Model {
         }
     }
 
-    /// Initialize Candle GPU backend
+    /// Initialize Candle GPU backend (only available with "cuda" or "metal" features)
+    #[cfg(any(feature = "cuda", feature = "metal"))]
     pub fn init_candle_gpu(&mut self) -> Result<()> {
         match CandleGpuBackend::new() {
             Ok(gpu_backend) => {
@@ -242,7 +247,10 @@ impl Model {
 
     /// Matrix multiplication with GPU/CPU fallback
     ///
-    /// Tries GPU first (if enabled), falls back to CPU
+    /// Tries GPU backends in this order:
+    /// 1. Candle GPU (CUDA/Metal) - Native GPU, always available
+    /// 2. WebGPU - Browser GPU, only with `webgpu` feature
+    /// 3. CPU (Candle-optimized) - Fallback
     ///
     /// # Arguments
     /// * `transposed_b` - If true, B is stored as [n, k] (GGUF format) and will use efficient transpose matmul
@@ -255,7 +263,8 @@ impl Model {
         n: usize,
         transposed_b: bool,
     ) -> Result<Vec<f32>> {
-        // Try Candle GPU backend first
+        // 1. Try Candle GPU backend first (CUDA/Metal - native)
+        #[cfg(any(feature = "cuda", feature = "metal"))]
         if let Some(ref gpu_backend) = self.gpu_backend {
             // Convert inputs to tensors
             let a_tensor = gpu_backend.f32_to_tensor(a, &[m, k]).map_err(|e| {
@@ -299,7 +308,7 @@ impl Model {
             });
         }
 
-        #[cfg(feature = "gpu")]
+        #[cfg(feature = "webgpu")]
         if let Some(ref gpu) = self.gpu {
             // Try GPU matmul
             // TODO: GPU also needs to handle transposed case
@@ -681,7 +690,7 @@ impl Model {
         position: usize,
     ) -> Result<Vec<f32>> {
         let kv_cache = &mut self.kv_caches[layer_idx];
-        #[cfg(feature = "gpu")]
+        #[cfg(feature = "webgpu")]
         let gpu = self.gpu.as_ref();
 
         self.layers[layer_idx].forward(
@@ -689,7 +698,7 @@ impl Model {
             kv_cache,
             position,
             &self.candle_backend,
-            #[cfg(feature = "gpu")]
+            #[cfg(feature = "webgpu")]
             gpu,
         )
     }
