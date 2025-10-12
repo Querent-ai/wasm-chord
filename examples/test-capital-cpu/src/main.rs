@@ -24,7 +24,7 @@ fn main() -> Result<()> {
     println!("📦 Loading model: {}", model_path);
 
     // Open and parse GGUF file
-    let file = File::open(model_path)?;
+    let file = File::open(&model_path)?;
     let reader = BufReader::new(file);
     let mut parser = GGUFParser::new(reader);
     let meta = parser.parse_header()?;
