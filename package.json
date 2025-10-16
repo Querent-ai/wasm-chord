@@ -1,0 +1,27 @@
+{
+  "name": "wasm-chord",
+  "version": "1.0.0",
+  "description": "> High-performance LLM inference runtime for WebAssembly and native platforms",
+  "main": "test-async-headless.js",
+  "directories": {
+    "doc": "docs",
+    "example": "examples"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Querent-ai/wasm-chord.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Querent-ai/wasm-chord/issues"
+  },
+  "homepage": "https://github.com/Querent-ai/wasm-chord#readme",
+  "dependencies": {
+    "puppeteer": "^24.25.0"
+  }
+}

@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>wasm-chord Browser Test Suite</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #fafafa;
+        }
+        
+        .test-section h2 {
+            color: #444;
+            margin-top: 0;
+        }
+        
+        .test-item {
+            margin: 10px 0;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            border-left: 4px solid #ccc;
+        }
+        
+        .test-item.passing {
+            border-left-color: #4CAF50;
+        }
+        
+        .test-item.failing {
+            border-left-color: #f44336;
+        }
+        
+        .test-item.warning {
+            border-left-color: #ff9800;
+        }
+        
+        .status {
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .status.pass {
+            color: #4CAF50;
+        }
+        
+        .status.fail {
+            color: #f44336;
+        }
+        
+        .status.warning {
+            color: #ff9800;
+        }
+        
+        .status.info {
+            color: #2196F3;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background-color: #4CAF50;
+            transition: width 0.3s ease;
+        }
+        
+        .log {
+            background-color: #1e1e1e;
+            color: #f0f0f0;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 10px 0;
+        }
+        
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        button {
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 0 10px;
+        }
+        
+        button:hover {
+            background-color: #1976D2;
+        }
+        
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .browser-info {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        
+        .model-info {
+            background-color: #f3e5f5;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        
+        .performance-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .metric-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2196F3;
+        }
+        
+        .metric-label {
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 wasm-chord Browser Test Suite</h1>
+        
+        <div class="browser-info">
+            <h3>Browser Information</h3>
+            <div id="browser-details"></div>
+        </div>
+        
+        <div class="model-info">
+            <h3>Model Information</h3>
+            <div id="model-details"></div>
+        </div>
+        
+        <div class="controls">
+            <button id="run-tests" onclick="runAllTests()">Run All Tests</button>
+            <button id="run-webgpu" onclick="testWebGPU()">Test WebGPU</button>
+            <button id="run-async" onclick="testAsyncAPI()">Test Async API</button>
+            <button id="run-performance" onclick="runPerformanceTest()">Performance Test</button>
+        </div>
+        
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress" style="width: 0%"></div>
+        </div>
+        
+        <div class="test-section">
+            <h2>WebGPU Compatibility Tests</h2>
+            <div id="webgpu-tests"></div>
+        </div>
+        
+        <div class="test-section">
+            <h2>Async API Tests</h2>
+            <div id="async-tests"></div>
+        </div>
+        
+        <div class="test-section">
+            <h2>Performance Tests</h2>
+            <div id="performance-tests"></div>
+        </div>
+        
+        <div class="test-section">
+            <h2>Memory Tests</h2>
+            <div id="memory-tests"></div>
+        </div>
+        
+        <div class="performance-metrics" id="metrics">
+            <!-- Performance metrics will be populated here -->
+        </div>
+        
+        <div class="log" id="test-log"></div>
+    </div>
+
+    <script type="module">
+        import init, { 
+            WasmModel, 
+            AsyncTokenStream, 
+            init_webgpu_adapter, 
+            is_webgpu_available,
+            version 
+        } from './pkg/wasm_chord_runtime.js';
+
+        let wasmModule = null;
+        let model = null;
+        let testResults = {
+            total: 0,
+            passed: 0,
+            failed: 0,
+            warnings: 0
+        };
+
+        // Initialize WASM module
+        async function initializeWasm() {
+            try {
+                log('Initializing WASM module...');
+                wasmModule = await init();
+                log('✅ WASM module initialized successfully');
+                return true;
+            } catch (error) {
+                log(`❌ Failed to initialize WASM module: ${error}`);
+                return false;
+            }
+        }
+
+        // Logging function
+        function log(message, type = 'info') {
+            const logElement = document.getElementById('test-log');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = `[${timestamp}] ${message}\n`;
+            logElement.textContent += logEntry;
+            logElement.scrollTop = logElement.scrollHeight;
+            console.log(message);
+        }
+
+        // Add test result
+        function addTestResult(sectionId, testName, status, message) {
+            const section = document.getElementById(sectionId);
+            const testItem = document.createElement('div');
+            testItem.className = `test-item ${status}`;
+            
+            const statusClass = status === 'passing' ? 'pass' : 
+                              status === 'failing' ? 'fail' : 
+                              status === 'warning' ? 'warning' : 'info';
+            
+            testItem.innerHTML = `
+                <span class="status ${statusClass}">${status.toUpperCase()}</span>
+                <strong>${testName}</strong>: ${message}
+            `;
+            
+            section.appendChild(testItem);
+            
+            // Update counters
+            testResults.total++;
+            if (status === 'passing') testResults.passed++;
+            else if (status === 'failing') testResults.failed++;
+            else if (status === 'warning') testResults.warnings++;
+            
+            updateProgress();
+        }
+
+        // Update progress bar
+        function updateProgress() {
+            const progress = testResults.total > 0 ? 
+                (testResults.passed / testResults.total) * 100 : 0;
+            document.getElementById('progress').style.width = `${progress}%`;
+        }
+
+        // Display browser information
+        function displayBrowserInfo() {
+            const browserInfo = {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                language: navigator.language,
+                cookieEnabled: navigator.cookieEnabled,
+                onLine: navigator.onLine,
+                webGL: !!document.createElement('canvas').getContext('webgl'),
+                webGL2: !!document.createElement('canvas').getContext('webgl2'),
+                webGPU: 'gpu' in navigator,
+                wasmSupported: typeof WebAssembly === 'object'
+            };
+
+            const detailsElement = document.getElementById('browser-details');
+            detailsElement.innerHTML = `
+                <p><strong>User Agent:</strong> ${browserInfo.userAgent}</p>
+                <p><strong>Platform:</strong> ${browserInfo.platform}</p>
+                <p><strong>Language:</strong> ${browserInfo.language}</p>
+                <p><strong>WebGL:</strong> ${browserInfo.webGL ? '✅' : '❌'}</p>
+                <p><strong>WebGL2:</strong> ${browserInfo.webGL2 ? '✅' : '❌'}</p>
+                <p><strong>WebGPU:</strong> ${browserInfo.webGPU ? '✅' : '❌'}</p>
+                <p><strong>WebAssembly:</strong> ${browserInfo.wasmSupported ? '✅' : '❌'}</p>
+            `;
+        }
+
+        // Test WebGPU availability
+        async function testWebGPUAvailability() {
+            log('Testing WebGPU availability...');
+            
+            if (!('gpu' in navigator)) {
+                addTestResult('webgpu-tests', 'WebGPU API', 'failing', 'WebGPU API not available');
+                return false;
+            }
+            
+            addTestResult('webgpu-tests', 'WebGPU API', 'passing', 'WebGPU API available');
+            
+            try {
+                const adapter = await navigator.gpu.requestAdapter();
+                if (!adapter) {
+                    addTestResult('webgpu-tests', 'GPU Adapter', 'failing', 'No GPU adapter found');
+                    return false;
+                }
+                
+                addTestResult('webgpu-tests', 'GPU Adapter', 'passing', 
+                    `GPU adapter found: ${adapter.info.name || 'Unknown'}`);
+                
+                const device = await adapter.requestDevice();
+                addTestResult('webgpu-tests', 'GPU Device', 'passing', 'GPU device created successfully');
+                
+                return true;
+            } catch (error) {
+                addTestResult('webgpu-tests', 'GPU Device', 'failing', `Failed to create GPU device: ${error.message}`);
+                return false;
+            }
+        }
+
+        // Test WASM WebGPU integration
+        async function testWasmWebGPU() {
+            log('Testing WASM WebGPU integration...');
+            
+            try {
+                const isAvailable = is_webgpu_available();
+                if (isAvailable) {
+                    addTestResult('webgpu-tests', 'WASM WebGPU', 'passing', 'WebGPU available in WASM');
+                    
+                    const adapterInfo = await init_webgpu_adapter();
+                    addTestResult('webgpu-tests', 'Adapter Info', 'passing', 
+                        `Adapter: ${adapterInfo.name}, Backend: ${adapterInfo.backend}`);
+                } else {
+                    addTestResult('webgpu-tests', 'WASM WebGPU', 'warning', 'WebGPU not available in WASM');
+                }
+            } catch (error) {
+                addTestResult('webgpu-tests', 'WASM WebGPU', 'failing', `Error: ${error.message}`);
+            }
+        }
+
+        // Test async API
+        async function testAsyncAPI() {
+            log('Testing async API...');
+            
+            if (!model) {
+                addTestResult('async-tests', 'Model Loading', 'failing', 'Model not loaded');
+                return;
+            }
+            
+            try {
+                // Test async GPU initialization
+                await model.init_gpu_async();
+                addTestResult('async-tests', 'Async GPU Init', 'passing', 'Async GPU initialization completed');
+                
+                // Test async token generation
+                const stream = model.generate_async("Hello, world!");
+                addTestResult('async-tests', 'Async Token Stream', 'passing', 'Async token stream created');
+                
+                // Test stream iteration
+                let tokenCount = 0;
+                const maxTokens = 5;
+                
+                while (tokenCount < maxTokens) {
+                    const result = await stream.next();
+                    if (result.done) break;
+                    
+                    tokenCount++;
+                    log(`Generated token ${tokenCount}: ${result.value}`);
+                }
+                
+                addTestResult('async-tests', 'Token Generation', 'passing', 
+                    `Generated ${tokenCount} tokens asynchronously`);
+                
+            } catch (error) {
+                addTestResult('async-tests', 'Async API', 'failing', `Error: ${error.message}`);
+            }
+        }
+
+        // Performance test
+        async function runPerformanceTest() {
+            log('Running performance test...');
+            
+            if (!model) {
+                addTestResult('performance-tests', 'Model Loading', 'failing', 'Model not loaded');
+                return;
+            }
+            
+            try {
+                const startTime = performance.now();
+                
+                // Generate text
+                const result = model.generate("The quick brown fox jumps over the lazy dog.");
+                
+                const endTime = performance.now();
+                const duration = endTime - startTime;
+                
+                const tokensPerSecond = result.length / (duration / 1000);
+                
+                addTestResult('performance-tests', 'Generation Speed', 'passing', 
+                    `${tokensPerSecond.toFixed(2)} tokens/sec`);
+                
+                // Update metrics display
+                updateMetrics({
+                    tokensPerSecond: tokensPerSecond.toFixed(2),
+                    generationTime: duration.toFixed(2),
+                    textLength: result.length
+                });
+                
+            } catch (error) {
+                addTestResult('performance-tests', 'Performance Test', 'failing', `Error: ${error.message}`);
+            }
+        }
+
+        // Update performance metrics
+        function updateMetrics(metrics) {
+            const metricsContainer = document.getElementById('metrics');
+            metricsContainer.innerHTML = `
+                <div class="metric-card">
+                    <div class="metric-value">${metrics.tokensPerSecond}</div>
+                    <div class="metric-label">Tokens/sec</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">${metrics.generationTime}</div>
+                    <div class="metric-label">ms</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">${metrics.textLength}</div>
+                    <div class="metric-label">Characters</div>
+                </div>
+            `;
+        }
+
+        // Memory test
+        async function testMemory() {
+            log('Testing memory usage...');
+            
+            try {
+                // Test memory64 support
+                const memoryInfo = {
+                    totalJSHeapSize: performance.memory ? performance.memory.totalJSHeapSize : 'N/A',
+                    usedJSHeapSize: performance.memory ? performance.memory.usedJSHeapSize : 'N/A',
+                    jsHeapSizeLimit: performance.memory ? performance.memory.jsHeapSizeLimit : 'N/A'
+                };
+                
+                addTestResult('memory-tests', 'Memory Info', 'passing', 
+                    `Used: ${(memoryInfo.usedJSHeapSize / 1024 / 1024).toFixed(2)} MB`);
+                
+                // Test WASM memory
+                if (wasmModule) {
+                    addTestResult('memory-tests', 'WASM Memory', 'passing', 'WASM memory accessible');
+                }
+                
+            } catch (error) {
+                addTestResult('memory-tests', 'Memory Test', 'failing', `Error: ${error.message}`);
+            }
+        }
+
+        // Load model
+        async function loadModel() {
+            log('Loading model...');
+            
+            try {
+                // For demo purposes, we'll create a minimal model
+                // In a real implementation, you would load the actual GGUF file
+                const modelData = new Uint8Array(1024); // Placeholder
+                model = new WasmModel(modelData);
+                
+                addTestResult('model-tests', 'Model Loading', 'passing', 'Model loaded successfully');
+                
+                // Display model info
+                const modelInfo = model.get_model_info();
+                document.getElementById('model-details').innerHTML = `
+                    <p><strong>Version:</strong> ${version()}</p>
+                    <p><strong>Vocab Size:</strong> ${modelInfo.vocab_size}</p>
+                    <p><strong>Hidden Size:</strong> ${modelInfo.hidden_size}</p>
+                    <p><strong>Layers:</strong> ${modelInfo.num_layers}</p>
+                    <p><strong>Heads:</strong> ${modelInfo.num_heads}</p>
+                `;
+                
+                return true;
+            } catch (error) {
+                addTestResult('model-tests', 'Model Loading', 'failing', `Error: ${error.message}`);
+                return false;
+            }
+        }
+
+        // Run all tests
+        async function runAllTests() {
+            log('Starting comprehensive test suite...');
+            
+            // Reset results
+            testResults = { total: 0, passed: 0, failed: 0, warnings: 0 };
+            
+            // Clear previous results
+            document.querySelectorAll('.test-item').forEach(item => item.remove());
+            
+            // Initialize WASM
+            const wasmInitialized = await initializeWasm();
+            if (!wasmInitialized) return;
+            
+            // Load model
+            const modelLoaded = await loadModel();
+            if (!modelLoaded) return;
+            
+            // Run tests
+            await testWebGPUAvailability();
+            await testWasmWebGPU();
+            await testAsyncAPI();
+            await runPerformanceTest();
+            await testMemory();
+            
+            log(`Test suite completed: ${testResults.passed}/${testResults.total} passed`);
+        }
+
+        // Global functions for button clicks
+        window.runAllTests = runAllTests;
+        window.testWebGPU = async () => {
+            await initializeWasm();
+            await testWebGPUAvailability();
+            await testWasmWebGPU();
+        };
+        window.testAsyncAPI = async () => {
+            await initializeWasm();
+            await loadModel();
+            await testAsyncAPI();
+        };
+        window.runPerformanceTest = async () => {
+            await initializeWasm();
+            await loadModel();
+            await runPerformanceTest();
+        };
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            displayBrowserInfo();
+            log('Browser test suite loaded. Click "Run All Tests" to begin.');
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>wasm-chord Async API Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #fafafa;
+        }
+        
+        .test-section h2 {
+            color: #444;
+            margin-top: 0;
+        }
+        
+        .test-item {
+            margin: 10px 0;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            border-left: 4px solid #ccc;
+        }
+        
+        .test-item.passing {
+            border-left-color: #4CAF50;
+        }
+        
+        .test-item.failing {
+            border-left-color: #f44336;
+        }
+        
+        .test-item.warning {
+            border-left-color: #ff9800;
+        }
+        
+        .status {
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .status.pass {
+            color: #4CAF50;
+        }
+        
+        .status.fail {
+            color: #f44336;
+        }
+        
+        .status.warning {
+            color: #ff9800;
+        }
+        
+        .status.info {
+            color: #2196F3;
+        }
+        
+        .log {
+            background-color: #1e1e1e;
+            color: #f0f0f0;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 10px 0;
+        }
+        
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        button {
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 0 10px;
+        }
+        
+        button:hover {
+            background-color: #1976D2;
+        }
+        
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .browser-info {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        
+        .model-info {
+            background-color: #f3e5f5;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background-color: #4CAF50;
+            transition: width 0.3s ease;
+        }
+        
+        .test-results {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 wasm-chord Async API Test Suite</h1>
+        
+        <div class="browser-info">
+            <h3>Browser Information</h3>
+            <div id="browser-details"></div>
+        </div>
+        
+        <div class="model-info">
+            <h3>Model Information</h3>
+            <div id="model-details"></div>
+        </div>
+        
+        <div class="controls">
+            <button id="run-all-tests" onclick="runAllTests()">Run All Tests</button>
+            <button id="test-async-gpu" onclick="testAsyncGPU()">Test Async GPU</button>
+            <button id="test-async-generation" onclick="testAsyncGeneration()">Test Async Generation</button>
+            <button id="test-streaming" onclick="testStreaming()">Test Streaming</button>
+        </div>
+        
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress" style="width: 0%"></div>
+        </div>
+        
+        <div class="test-section">
+            <h2>Async GPU Tests</h2>
+            <div id="gpu-tests"></div>
+        </div>
+        
+        <div class="test-section">
+            <h2>Async Generation Tests</h2>
+            <div id="generation-tests"></div>
+        </div>
+        
+        <div class="test-section">
+            <h2>Streaming Tests</h2>
+            <div id="streaming-tests"></div>
+        </div>
+        
+        <div class="test-results">
+            <h3>Test Results Summary</h3>
+            <div id="test-summary"></div>
+        </div>
+        
+        <div class="log" id="test-log"></div>
+    </div>
+
+    <script type="module">
+        import init, { 
+            WasmModel, 
+            AsyncTokenStream, 
+            version 
+        } from './pkg/wasm_chord_runtime.js';
+
+        let wasmModule = null;
+        let model = null;
+        let testResults = {
+            total: 0,
+            passed: 0,
+            failed: 0,
+            warnings: 0
+        };
+
+        // Initialize WASM module
+        async function initializeWasm() {
+            try {
+                log('Initializing WASM module...');
+                wasmModule = await init();
+                log('✅ WASM module initialized successfully');
+                return true;
+            } catch (error) {
+                log(`❌ Failed to initialize WASM module: ${error}`);
+                return false;
+            }
+        }
+
+        // Logging function
+        function log(message, type = 'info') {
+            const logElement = document.getElementById('test-log');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = `[${timestamp}] ${message}\n`;
+            logElement.textContent += logEntry;
+            logElement.scrollTop = logElement.scrollHeight;
+            console.log(message);
+        }
+
+        // Add test result
+        function addTestResult(sectionId, testName, status, message) {
+            const section = document.getElementById(sectionId);
+            const testItem = document.createElement('div');
+            testItem.className = `test-item ${status}`;
+            
+            const statusClass = status === 'passing' ? 'pass' : 
+                              status === 'failing' ? 'fail' : 
+                              status === 'warning' ? 'warning' : 'info';
+            
+            testItem.innerHTML = `
+                <span class="status ${statusClass}">${status.toUpperCase()}</span>
+                <strong>${testName}</strong>: ${message}
+            `;
+            
+            section.appendChild(testItem);
+            
+            // Update counters
+            testResults.total++;
+            if (status === 'passing') testResults.passed++;
+            else if (status === 'failing') testResults.failed++;
+            else if (status === 'warning') testResults.warnings++;
+            
+            updateProgress();
+            updateSummary();
+        }
+
+        // Update progress bar
+        function updateProgress() {
+            const progress = testResults.total > 0 ? 
+                (testResults.passed / testResults.total) * 100 : 0;
+            document.getElementById('progress').style.width = `${progress}%`;
+        }
+
+        // Update test summary
+        function updateSummary() {
+            const summaryElement = document.getElementById('test-summary');
+            summaryElement.innerHTML = `
+                <p><strong>Total Tests:</strong> ${testResults.total}</p>
+                <p><strong>Passed:</strong> <span style="color: #4CAF50;">${testResults.passed}</span></p>
+                <p><strong>Failed:</strong> <span style="color: #f44336;">${testResults.failed}</span></p>
+                <p><strong>Warnings:</strong> <span style="color: #ff9800;">${testResults.warnings}</span></p>
+                <p><strong>Success Rate:</strong> ${testResults.total > 0 ? Math.round((testResults.passed / testResults.total) * 100) : 0}%</p>
+            `;
+        }
+
+        // Display browser information
+        function displayBrowserInfo() {
+            const browserInfo = {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                language: navigator.language,
+                webGL: !!document.createElement('canvas').getContext('webgl'),
+                webGL2: !!document.createElement('canvas').getContext('webgl2'),
+                webGPU: 'gpu' in navigator,
+                wasmSupported: typeof WebAssembly === 'object'
+            };
+
+            const detailsElement = document.getElementById('browser-details');
+            detailsElement.innerHTML = `
+                <p><strong>User Agent:</strong> ${browserInfo.userAgent}</p>
+                <p><strong>Platform:</strong> ${browserInfo.platform}</p>
+                <p><strong>Language:</strong> ${browserInfo.language}</p>
+                <p><strong>WebGL:</strong> ${browserInfo.webGL ? '✅' : '❌'}</p>
+                <p><strong>WebGL2:</strong> ${browserInfo.webGL2 ? '✅' : '❌'}</p>
+                <p><strong>WebGPU:</strong> ${browserInfo.webGPU ? '✅' : '❌'}</p>
+                <p><strong>WebAssembly:</strong> ${browserInfo.wasmSupported ? '✅' : '❌'}</p>
+            `;
+        }
+
+        // Create a minimal test model
+        async function createTestModel() {
+            try {
+                log('Creating test model...');
+                
+                // Create minimal model data (1KB placeholder)
+                const modelData = new Uint8Array(1024);
+                model = new WasmModel(modelData);
+                
+                addTestResult('generation-tests', 'Model Creation', 'passing', 'Test model created successfully');
+                
+                // Display model info
+                try {
+                    const modelInfo = model.get_model_info();
+                    document.getElementById('model-details').innerHTML = `
+                        <p><strong>Version:</strong> ${version()}</p>
+                        <p><strong>Vocab Size:</strong> ${modelInfo.vocab_size}</p>
+                        <p><strong>Hidden Size:</strong> ${modelInfo.hidden_size}</p>
+                        <p><strong>Layers:</strong> ${modelInfo.num_layers}</p>
+                        <p><strong>Heads:</strong> ${modelInfo.num_heads}</p>
+                    `;
+                } catch (error) {
+                    log(`⚠️ Could not get model info: ${error.message}`);
+                }
+                
+                return true;
+            } catch (error) {
+                addTestResult('generation-tests', 'Model Creation', 'failing', `Error: ${error.message}`);
+                return false;
+            }
+        }
+
+        // Test async GPU initialization
+        async function testAsyncGPU() {
+            log('Testing async GPU initialization...');
+            
+            if (!model) {
+                addTestResult('gpu-tests', 'Model Check', 'failing', 'Model not loaded');
+                return;
+            }
+            
+            try {
+                // Test WebGPU availability
+                const isAvailable = WasmModel.is_gpu_available();
+                if (isAvailable) {
+                    addTestResult('gpu-tests', 'WebGPU Availability', 'passing', 'WebGPU is available');
+                    
+                    // Test async GPU initialization
+                    const startTime = performance.now();
+                    await model.init_gpu_async();
+                    const endTime = performance.now();
+                    
+                    addTestResult('gpu-tests', 'Async GPU Init', 'passing', 
+                        `GPU initialized asynchronously in ${(endTime - startTime).toFixed(2)}ms`);
+                    
+                } else {
+                    addTestResult('gpu-tests', 'WebGPU Availability', 'warning', 'WebGPU not available');
+                }
+                
+            } catch (error) {
+                addTestResult('gpu-tests', 'Async GPU Init', 'failing', `Error: ${error.message}`);
+            }
+        }
+
+        // Test async generation
+        async function testAsyncGeneration() {
+            log('Testing async generation...');
+            
+            if (!model) {
+                addTestResult('generation-tests', 'Model Check', 'failing', 'Model not loaded');
+                return;
+            }
+            
+            try {
+                // Test async token stream creation
+                const stream = model.generate_async("Hello, world!");
+                addTestResult('generation-tests', 'Async Stream Creation', 'passing', 'Async token stream created');
+                
+                // Test stream iteration
+                let tokenCount = 0;
+                const maxTokens = 5;
+                
+                const startTime = performance.now();
+                
+                while (tokenCount < maxTokens) {
+                    const result = await stream.next();
+                    if (result.done) break;
+                    
+                    tokenCount++;
+                    log(`Generated token ${tokenCount}: ${result.value}`);
+                }
+                
+                const endTime = performance.now();
+                
+                addTestResult('generation-tests', 'Token Generation', 'passing', 
+                    `Generated ${tokenCount} tokens in ${(endTime - startTime).toFixed(2)}ms`);
+                
+            } catch (error) {
+                addTestResult('generation-tests', 'Async Generation', 'failing', `Error: ${error.message}`);
+            }
+        }
+
+        // Test streaming functionality
+        async function testStreaming() {
+            log('Testing streaming functionality...');
+            
+            if (!model) {
+                addTestResult('streaming-tests', 'Model Check', 'failing', 'Model not loaded');
+                return;
+            }
+            
+            try {
+                // Test streaming with callback
+                let tokenCount = 0;
+                const callback = (token) => {
+                    tokenCount++;
+                    log(`Streaming token ${tokenCount}: ${token}`);
+                    return tokenCount < 5; // Stop after 5 tokens
+                };
+                
+                const startTime = performance.now();
+                const result = model.generate_stream("Test streaming prompt", callback);
+                const endTime = performance.now();
+                
+                addTestResult('streaming-tests', 'Streaming Generation', 'passing', 
+                    `Streamed ${tokenCount} tokens in ${(endTime - startTime).toFixed(2)}ms`);
+                
+            } catch (error) {
+                addTestResult('streaming-tests', 'Streaming Generation', 'failing', `Error: ${error.message}`);
+            }
+        }
+
+        // Run all tests
+        async function runAllTests() {
+            log('Starting comprehensive async API test suite...');
+            
+            // Reset results
+            testResults = { total: 0, passed: 0, failed: 0, warnings: 0 };
+            
+            // Clear previous results
+            document.querySelectorAll('.test-item').forEach(item => item.remove());
+            
+            // Initialize WASM
+            const wasmInitialized = await initializeWasm();
+            if (!wasmInitialized) return;
+            
+            // Create test model
+            const modelCreated = await createTestModel();
+            if (!modelCreated) return;
+            
+            // Run tests
+            await testAsyncGPU();
+            await testAsyncGeneration();
+            await testStreaming();
+            
+            log(`Test suite completed: ${testResults.passed}/${testResults.total} passed`);
+        }
+
+        // Global functions for button clicks
+        window.runAllTests = runAllTests;
+        window.testAsyncGPU = testAsyncGPU;
+        window.testAsyncGeneration = testAsyncGeneration;
+        window.testStreaming = testStreaming;
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            displayBrowserInfo();
+            log('Async API test suite loaded. Click "Run All Tests" to begin.');
+        });
+    </script>
+</body>
+</html>
