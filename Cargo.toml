@@ -54,6 +54,7 @@ members = [
     "examples/wasm-10gb-test",
     "examples/fused-kernels-test",
     "examples/debug-forward-pass",
+    "examples/memory64-simple",
 ]
 
 [workspace.package]
