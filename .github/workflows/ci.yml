@@ -109,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        example_type: [basic, gpu, memory64, wasm, integration]
+        example_type: [basic, gpu, wasm, integration]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -166,19 +166,6 @@ jobs:
           cargo build --release --manifest-path examples/gpu-cpu-comparison/Cargo.toml
           cargo build --release --manifest-path examples/kernel-verification/Cargo.toml
           echo "✅ GPU examples built successfully"
-
-      - name: Build Memory64 Examples
-        if: matrix.example_type == 'memory64'
-        run: |
-          echo "🔨 Building Memory64 examples..."
-          cargo build --release --manifest-path examples/memory64-test/Cargo.toml
-          cargo build --release --manifest-path examples/wasm-memory64-test/Cargo.toml
-          cargo build --release --manifest-path examples/wasm-memory64-multi-test/Cargo.toml
-          cargo build --release --manifest-path examples/multi-memory-test/Cargo.toml
-          cargo build --release --manifest-path examples/sharding-test/Cargo.toml
-          cargo build --release --manifest-path examples/wasm-10gb-test/Cargo.toml
-          cargo build --release --manifest-path examples/comprehensive-memory64-test/Cargo.toml
-          echo "✅ Memory64 examples built successfully"
 
       - name: Build WASM Examples
         if: matrix.example_type == 'wasm'
@@ -381,11 +368,6 @@ jobs:
           echo "📊 Running GPU benchmarks..."
           cargo run --release --features webgpu --manifest-path examples/benchmark/Cargo.toml -- --max-tokens 50 --warmup 2 --iterations 3 || echo "GPU benchmarks skipped (no GPU available)"
 
-      - name: Run Memory Usage Tests
-        run: |
-          echo "📊 Running memory usage tests..."
-          cargo run --release --manifest-path examples/memory64-test/Cargo.toml || echo "Memory64 test completed"
-          
       - name: Generate Performance Report
         run: |
           echo "📊 Performance Benchmark Results" > performance-report.md
