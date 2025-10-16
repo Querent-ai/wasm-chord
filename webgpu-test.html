@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGPU Availability Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .result { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background: #e8f5e8; color: #2e7d32; }
+        .error { background: #ffebee; color: #c62828; }
+        .warning { background: #fff3e0; color: #f57c00; }
+    </style>
+</head>
+<body>
+    <h1>WebGPU Availability Test</h1>
+    <div id="results"></div>
+    
+    <script type="module">
+        function addResult(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `result ${type}`;
+            div.textContent = message;
+            document.getElementById('results').appendChild(div);
+            console.log(message);
+        }
+
+        async function testWebGPU() {
+            addResult('🔍 Testing WebGPU availability...');
+            
+            // Test 1: Check if WebGPU API exists
+            if ('gpu' in navigator) {
+                addResult('✅ WebGPU API is available in navigator', 'success');
+                
+                // Test 2: Try to request adapter
+                try {
+                    const adapter = await navigator.gpu.requestAdapter();
+                    if (adapter) {
+                        addResult('✅ GPU adapter found', 'success');
+                        addResult(`📊 Adapter: ${adapter.info?.name || 'Unknown'}`, 'success');
+                        
+                        // Test 3: Try to request device
+                        try {
+                            const device = await adapter.requestDevice();
+                            addResult('✅ GPU device created successfully', 'success');
+                        } catch (deviceError) {
+                            addResult(`⚠️ Device creation failed: ${deviceError.message}`, 'warning');
+                        }
+                    } else {
+                        addResult('⚠️ No GPU adapter found', 'warning');
+                    }
+                } catch (adapterError) {
+                    addResult(`❌ Adapter request failed: ${adapterError.message}`, 'error');
+                }
+            } else {
+                addResult('❌ WebGPU API not available in navigator', 'error');
+            }
+            
+            // Test 4: Test WASM-chord GPU detection
+            try {
+                addResult('🧪 Testing wasm-chord GPU detection...');
+                const wasmModule = await import('./pkg/wasm_chord_runtime.js');
+                await wasmModule.default();
+                
+                const gpuAvailable = wasmModule.WasmModel.is_gpu_available();
+                addResult(`📊 wasm-chord GPU detection: ${gpuAvailable ? 'Available' : 'Not Available'}`, 
+                    gpuAvailable ? 'success' : 'warning');
+                
+                // Test async GPU init
+                if (gpuAvailable) {
+                    try {
+                        const modelData = new Uint8Array(1024);
+                        const model = new wasmModule.WasmModel(modelData);
+                        
+                        addResult('🔄 Testing async GPU initialization...');
+                        await model.init_gpu_async();
+                        addResult('✅ Async GPU initialization successful', 'success');
+                    } catch (initError) {
+                        addResult(`⚠️ Async GPU init failed: ${initError.message}`, 'warning');
+                    }
+                }
+                
+            } catch (wasmError) {
+                addResult(`❌ WASM test failed: ${wasmError.message}`, 'error');
+            }
+        }
+
+        // Run test on page load
+        document.addEventListener('DOMContentLoaded', testWebGPU);
+    </script>
+</body>
+</html>

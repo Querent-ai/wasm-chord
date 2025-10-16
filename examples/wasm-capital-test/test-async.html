@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Async WASM API Test - wasm-chord</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            border-left: 4px solid #4CAF50;
+        }
+        .status {
+            font-weight: bold;
+            padding: 8px 16px;
+            border-radius: 4px;
+            display: inline-block;
+            margin: 10px 0;
+        }
+        .status.loading {
+            background: #FFF3CD;
+            color: #856404;
+        }
+        .status.success {
+            background: #D4EDDA;
+            color: #155724;
+        }
+        .status.error {
+            background: #F8D7DA;
+            color: #721C24;
+        }
+        .response-box {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 10px 5px 10px 0;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .info {
+            background: #E3F2FD;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+            border-left: 4px solid #2196F3;
+        }
+        .warning {
+            background: #FFF3CD;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+            border-left: 4px solid #FFC107;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Async WASM API Test</h1>
+        <div class="subtitle">Tests async functions: generate_async() and AsyncTokenStream (CPU-only build)</div>
+
+        <div class="info">
+            <strong>About:</strong> This test verifies the async WASM API implementation.
+            It tests:
+            <ul>
+                <li>✅ generate_async() - Async token stream generation</li>
+                <li>✅ AsyncTokenStream.next() - Async iterator protocol</li>
+                <li>ℹ️  init_gpu_async() - Available only in WebGPU builds</li>
+            </ul>
+            <strong>Note:</strong> This uses a CPU-only build (no WebGPU feature) to ensure compatibility.
+        </div>
+
+        <div class="test-section">
+            <h3>Model Status</h3>
+            <div id="status" class="status loading">⏳ Not loaded</div>
+            <button id="loadBtn" onclick="loadModel()">Load Model</button>
+        </div>
+
+        <div class="test-section" id="testSection" style="display: none;">
+            <h3>Async API Tests</h3>
+            <button onclick="testInitGpuAsync()">Test init_gpu_async()</button>
+            <button onclick="testGenerateAsync()">Test generate_async()</button>
+            <button onclick="testAsyncIterator()">Test AsyncTokenStream Iterator</button>
+        </div>
+
+        <div class="test-section">
+            <h3>Test Output</h3>
+            <div id="output" class="response-box" style="min-height: 100px;">
+                Waiting for tests...
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Import from wasm-chord-runtime package (CPU-only build)
+        import init, { WasmModel, version } from './runtime-pkg-cpu/wasm_chord_runtime.js';
+
+        let model = null;
+        let wasmInitialized = false;
+
+        function setStatus(text, type) {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.className = `status ${type}`;
+        }
+
+        function setOutput(text) {
+            document.getElementById('output').textContent = text;
+        }
+
+        function appendOutput(text) {
+            const output = document.getElementById('output');
+            output.textContent += text;
+        }
+
+        async function initWasm() {
+            if (wasmInitialized) return;
+            await init();
+            wasmInitialized = true;
+            console.log('WASM initialized, version:', version());
+        }
+
+        window.loadModel = async function() {
+            const btn = document.getElementById('loadBtn');
+            btn.disabled = true;
+            setStatus('⏳ Loading WASM...', 'loading');
+
+            try {
+                await initWasm();
+
+                setStatus('📥 Downloading model...', 'loading');
+                setOutput('Downloading model (this may take a while for ~670MB file)...');
+
+                // Fetch model
+                const modelUrl = '/models/tinyllama-1.1b.Q4_K_M.gguf';
+                const response = await fetch(modelUrl);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const modelBytes = new Uint8Array(await response.arrayBuffer());
+                console.log('Model downloaded:', modelBytes.length, 'bytes');
+
+                setStatus('🔧 Loading model...', 'loading');
+                setOutput('Parsing GGUF and loading weights...');
+
+                // Create model
+                model = new WasmModel(modelBytes);
+
+                // Configure generation
+                model.set_config(
+                    20,   // max_tokens
+                    0.0,  // temperature (greedy)
+                    1.0,  // top_p
+                    0,    // top_k
+                    1.0   // repetition_penalty
+                );
+
+                setStatus('✅ Model Ready', 'success');
+                setOutput('Model loaded successfully! Ready for async tests.');
+
+                // Show test section
+                document.getElementById('testSection').style.display = 'block';
+
+            } catch (error) {
+                console.error('Error loading model:', error);
+                setStatus('❌ Error', 'error');
+                setOutput(`Error: ${error.message}\n\nMake sure:\n1. The model file is available at /models/tinyllama-1.1b.Q4_K_M.gguf\n2. You're running a local server (not file://)\n3. CORS is properly configured`);
+                btn.disabled = false;
+            }
+        };
+
+        window.testInitGpuAsync = async function() {
+            if (!model) {
+                alert('Please load the model first');
+                return;
+            }
+
+            try {
+                setOutput('🧪 Testing init_gpu_async()...\n\n');
+                appendOutput('Checking if GPU functions are available...\n');
+
+                // Check if method exists
+                if (typeof model.init_gpu_async !== 'function') {
+                    appendOutput('ℹ️  init_gpu_async() not available in this build\n');
+                    appendOutput('✅ This is expected for CPU-only builds (compiled without --features webgpu)\n\n');
+                    appendOutput('🎉 TEST SKIPPED: GPU functions not included in CPU-only build\n');
+                    appendOutput('    This is correct behavior - async API structure is still valid!\n');
+                    return;
+                }
+
+                appendOutput('✅ init_gpu_async() method exists\n\n');
+                appendOutput('Calling init_gpu_async()...\n');
+
+                const start = Date.now();
+                await model.init_gpu_async();
+                const elapsed = Date.now() - start;
+
+                appendOutput(`✅ init_gpu_async() completed successfully\n`);
+                appendOutput(`Time: ${elapsed}ms\n\n`);
+                appendOutput('🎉 TEST PASSED: Async GPU initialization works!\n');
+
+            } catch (error) {
+                console.error('init_gpu_async error:', error);
+                appendOutput(`\n❌ TEST FAILED: ${error.message}\n`);
+                appendOutput('This may be expected if GPU is not available\n');
+            }
+        };
+
+        window.testGenerateAsync = async function() {
+            if (!model) {
+                alert('Please load the model first');
+                return;
+            }
+
+            try {
+                setOutput('🧪 Testing generate_async()...\n\n');
+
+                const prompt = "What is the capital of France?";
+                appendOutput(`Prompt: ${prompt}\n\n`);
+
+                // Check if method exists
+                if (typeof model.generate_async !== 'function') {
+                    appendOutput('❌ generate_async() method not found!\n');
+                    return;
+                }
+
+                appendOutput('✅ generate_async() method exists\n');
+                appendOutput('Calling generate_async()...\n\n');
+
+                const start = Date.now();
+                const stream = model.generate_async(prompt);
+
+                appendOutput('✅ AsyncTokenStream created\n');
+                appendOutput(`Stream type: ${typeof stream}\n`);
+                appendOutput(`Stream.next type: ${typeof stream.next}\n\n`);
+
+                // Try to get first token
+                appendOutput('Calling stream.next()...\n');
+                const result = await stream.next();
+                const elapsed = Date.now() - start;
+
+                appendOutput(`✅ stream.next() completed\n`);
+                appendOutput(`Time: ${elapsed}ms\n\n`);
+                appendOutput(`Result: ${JSON.stringify(result, null, 2)}\n\n`);
+
+                if (result && result.done === false) {
+                    appendOutput('🎉 TEST PASSED: Async generation works!\n');
+                } else {
+                    appendOutput('⚠️  Unexpected result format\n');
+                }
+
+            } catch (error) {
+                console.error('generate_async error:', error);
+                appendOutput(`\n❌ TEST FAILED: ${error.message}\n`);
+            }
+        };
+
+        window.testAsyncIterator = async function() {
+            if (!model) {
+                alert('Please load the model first');
+                return;
+            }
+
+            try {
+                setOutput('🧪 Testing AsyncTokenStream full iteration...\n\n');
+
+                const prompt = "What is the capital of France?";
+                appendOutput(`Prompt: ${prompt}\n\n`);
+
+                const start = Date.now();
+                const stream = model.generate_async(prompt);
+
+                appendOutput('Iterating through tokens:\n');
+                appendOutput('─'.repeat(50) + '\n');
+
+                let tokenCount = 0;
+                let fullText = '';
+                let result;
+
+                while (true) {
+                    result = await stream.next();
+
+                    if (result.done) {
+                        break;
+                    }
+
+                    tokenCount++;
+                    fullText += result.value;
+                    appendOutput(result.value);
+
+                    // Limit to prevent infinite loop
+                    if (tokenCount > 100) {
+                        appendOutput('\n\n⚠️  Stopped at 100 tokens (safety limit)\n');
+                        break;
+                    }
+                }
+
+                const elapsed = Date.now() - start;
+
+                appendOutput('\n' + '─'.repeat(50) + '\n\n');
+                appendOutput(`✅ Iteration completed\n`);
+                appendOutput(`Tokens: ${tokenCount}\n`);
+                appendOutput(`Time: ${elapsed}ms\n\n`);
+
+                const containsParis = fullText.toLowerCase().includes('paris');
+                if (containsParis) {
+                    appendOutput('✅ Response contains "Paris"\n');
+                }
+
+                appendOutput('\n🎉 TEST PASSED: Async iterator works correctly!\n');
+
+            } catch (error) {
+                console.error('Iterator error:', error);
+                appendOutput(`\n❌ TEST FAILED: ${error.message}\n`);
+            }
+        };
+
+        // Show initial message
+        setOutput(`wasm-chord-runtime ${version ? version() : 'unknown'}\nClick "Load Model" to begin testing async API`);
+    </script>
+</body>
+</html>

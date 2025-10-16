@@ -83,6 +83,7 @@ bincode = "2.0.1"
 
 # Wasm-specific
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "console",

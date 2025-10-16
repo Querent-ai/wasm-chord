@@ -145,7 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     println!("\n🔍 Checking specific expected tokens:");
-    for (desc, variants) in &test_tokens {
+    for (_desc, variants) in &test_tokens {
         for variant in variants {
             if let Some(token_id) = tokenizer.token_to_id(variant) {
                 let logit = logits[token_id as usize];
@@ -157,7 +157,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let max_token = indexed_logits[0].0;
-    let max_logit = indexed_logits[0].1;
+    let _max_logit = indexed_logits[0].1;
     let token_text = tokenizer.id_to_token(max_token as u32);
     let token_str = token_text.unwrap_or("<unknown>");
 

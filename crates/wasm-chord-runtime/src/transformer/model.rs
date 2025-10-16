@@ -228,6 +228,27 @@ impl Model {
         }
     }
 
+    /// Initialize GPU backend asynchronously (if feature enabled)
+    #[cfg(feature = "webgpu")]
+    pub async fn init_gpu_async(&mut self) -> Result<()> {
+        if GpuBackend::is_available() {
+            match GpuBackend::new().await {
+                Ok(gpu) => {
+                    eprintln!("✅ GPU backend initialized successfully");
+                    self.gpu = Some(gpu);
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("⚠️  GPU initialization failed: {}", e);
+                    Ok(()) // Fall back to CPU
+                }
+            }
+        } else {
+            eprintln!("⚠️  GPU not available, using CPU backend");
+            Ok(())
+        }
+    }
+
     /// Initialize Candle GPU backend (only available with "cuda" or "metal" features)
     #[cfg(any(feature = "cuda", feature = "metal"))]
     pub fn init_candle_gpu(&mut self) -> Result<()> {

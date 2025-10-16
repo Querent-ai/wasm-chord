@@ -179,14 +179,23 @@ impl GpuBackend {
 
     /// Check if GPU is available
     pub fn is_available() -> bool {
-        // Simple check - try to create instance
         #[cfg(target_arch = "wasm32")]
         {
-            false // Need JS integration for browser
+            // For WASM, we need to check if WebGPU is available in the browser
+            // This is a synchronous check that doesn't require async initialization
+
+            // Check if the WebGPU API is available
+            if let Some(window) = web_sys::window() {
+                let navigator = window.navigator();
+                // Check if 'gpu' property exists on navigator
+                return js_sys::Reflect::has(&navigator, &"gpu".into()).unwrap_or(false);
+            }
+            false
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            true // Native platforms supported
+            // For native platforms, we can assume GPU support
+            true
         }
     }
 }

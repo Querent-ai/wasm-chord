@@ -1,0 +1,152 @@
+name: WASM Runtime Test
+
+on:
+  push:
+    branches: [ main, dev ]
+    paths:
+      - 'crates/wasm-chord-runtime/**'
+      - 'crates/wasm-chord-core/**'
+      - 'crates/wasm-chord-cpu/**'
+      - 'examples/wasm-capital-test/**'
+      - '.github/workflows/wasm-test.yml'
+  pull_request:
+    branches: [ main, dev ]
+    paths:
+      - 'crates/wasm-chord-runtime/**'
+      - 'crates/wasm-chord-core/**'
+      - 'crates/wasm-chord-cpu/**'
+      - 'examples/wasm-capital-test/**'
+      - '.github/workflows/wasm-test.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  wasm-build:
+    name: Build WASM Packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: |
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache target directory
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-target-wasm-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build WASM (Node.js target)
+        run: |
+          cd crates/wasm-chord-runtime
+          wasm-pack build --target nodejs
+          mkdir -p ../../examples/wasm-capital-test/runtime-pkg-node
+          cp -r pkg/* ../../examples/wasm-capital-test/runtime-pkg-node/
+
+      - name: Build WASM (Web target - CPU only)
+        run: |
+          cd crates/wasm-chord-runtime
+          wasm-pack build --target web
+          mkdir -p ../../examples/wasm-capital-test/runtime-pkg-cpu
+          cp -r pkg/* ../../examples/wasm-capital-test/runtime-pkg-cpu/
+
+      - name: Build WASM (Web target - WebGPU)
+        run: |
+          cd crates/wasm-chord-runtime
+          wasm-pack build --target web --features webgpu
+          mkdir -p ../../examples/wasm-capital-test/runtime-pkg-webgpu
+          cp -r pkg/* ../../examples/wasm-capital-test/runtime-pkg-webgpu/
+
+      - name: Verify builds
+        run: |
+          echo "Node.js build:"
+          ls -lh examples/wasm-capital-test/runtime-pkg-node/
+          echo ""
+          echo "Web CPU build:"
+          ls -lh examples/wasm-capital-test/runtime-pkg-cpu/
+          echo ""
+          echo "Web WebGPU build:"
+          ls -lh examples/wasm-capital-test/runtime-pkg-webgpu/
+
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-packages
+          path: |
+            examples/wasm-capital-test/runtime-pkg-node/
+            examples/wasm-capital-test/runtime-pkg-cpu/
+            examples/wasm-capital-test/runtime-pkg-webgpu/
+
+  # Commented out until we can run with smaller model or more memory
+  # wasm-test:
+  #   name: Test WASM Runtime
+  #   runs-on: ubuntu-latest
+  #   needs: wasm-build
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Setup Node.js
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: '20'
+  #
+  #     - name: Download WASM artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: wasm-packages
+  #         path: examples/wasm-capital-test/
+  #
+  #     - name: Download test model (small)
+  #       run: |
+  #         # TODO: Use smaller model for CI (e.g., TinyLlama 160M or similar)
+  #         # Current model (1.1B) causes OOM in CI
+  #         echo "Skipping model download - need smaller model for CI"
+  #
+  #     - name: Run WASM tests
+  #       run: |
+  #         cd examples/wasm-capital-test
+  #         node test-wasm-node.mjs
+
+  wasm-lint:
+    name: Lint WASM Code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+          target: wasm32-unknown-unknown
+
+      - name: Run clippy
+        run: |
+          cargo clippy --target wasm32-unknown-unknown \
+            --package wasm-chord-runtime \
+            -- -D warnings
+
+      - name: Check formatting
+        run: |
+          cargo fmt --check --package wasm-chord-runtime

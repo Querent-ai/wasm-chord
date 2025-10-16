@@ -130,8 +130,10 @@ fn main() -> Result<()> {
 
     // Cleanup
     println!("\n🧹 Cleaning up...");
-    unsafe { wasmchord_close_stream(stream_handle) };
-    unsafe { wasmchord_free_model(model_handle) };
+    unsafe {
+        wasmchord_close_stream(stream_handle);
+        wasmchord_free_model(model_handle);
+    }
     println!("✓ Cleanup completed");
 
     println!("\n🎉 ABI test completed successfully!");

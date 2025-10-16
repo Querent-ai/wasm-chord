@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>wasm-chord Model Creation Debug</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .log { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .error { background: #ffebee; color: #c62828; }
+        .success { background: #e8f5e8; color: #2e7d32; }
+    </style>
+</head>
+<body>
+    <h1>wasm-chord Model Creation Debug</h1>
+    <div id="log"></div>
+    
+    <script type="module">
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const div = document.createElement('div');
+            div.className = `log ${type}`;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(div);
+            console.log(message);
+        }
+
+        async function debugModelCreation() {
+            try {
+                log('🔄 Importing WASM module...');
+                const wasmModule = await import('./pkg/wasm_chord_runtime.js');
+                
+                log('🔄 Initializing WASM...');
+                await wasmModule.default();
+                
+                log('✅ WASM initialized');
+                log(`📊 Version: ${wasmModule.version()}`);
+                
+                // Test different model data sizes
+                const testSizes = [1024, 4096, 16384, 65536];
+                
+                for (const size of testSizes) {
+                    try {
+                        log(`🧪 Testing model creation with ${size} bytes...`);
+                        const modelData = new Uint8Array(size);
+                        
+                        // Fill with some pattern to make it more realistic
+                        for (let i = 0; i < size; i++) {
+                            modelData[i] = i % 256;
+                        }
+                        
+                        const model = new wasmModule.WasmModel(modelData);
+                        log(`✅ Model created successfully with ${size} bytes`, 'success');
+                        
+                        // Try to get model info
+                        try {
+                            const info = model.get_model_info();
+                            log(`📊 Model info: vocab=${info.vocab_size}, hidden=${info.hidden_size}`, 'success');
+                        } catch (infoError) {
+                            log(`⚠️ Could not get model info: ${infoError.message}`);
+                        }
+                        
+                        break; // Stop on first success
+                        
+                    } catch (error) {
+                        log(`❌ Failed with ${size} bytes: ${error.message}`, 'error');
+                        log(`❌ Error stack: ${error.stack}`, 'error');
+                    }
+                }
+                
+                // Test GPU availability
+                log('🧪 Testing GPU availability...');
+                const gpuAvailable = wasmModule.WasmModel.is_gpu_available();
+                log(`📊 GPU available: ${gpuAvailable}`, gpuAvailable ? 'success' : 'error');
+                
+                // Test async GPU init if available
+                if (gpuAvailable) {
+                    try {
+                        log('🧪 Testing async GPU initialization...');
+                        const modelData = new Uint8Array(4096);
+                        const model = new wasmModule.WasmModel(modelData);
+                        
+                        const startTime = performance.now();
+                        await model.init_gpu_async();
+                        const endTime = performance.now();
+                        
+                        log(`✅ Async GPU init successful in ${(endTime - startTime).toFixed(2)}ms`, 'success');
+                        
+                    } catch (gpuError) {
+                        log(`❌ Async GPU init failed: ${gpuError.message}`, 'error');
+                    }
+                }
+                
+            } catch (error) {
+                log(`❌ Critical error: ${error.message}`, 'error');
+                log(`❌ Error stack: ${error.stack}`, 'error');
+            }
+        }
+
+        // Run debug on page load
+        document.addEventListener('DOMContentLoaded', debugModelCreation);
+    </script>
+</body>
+</html>

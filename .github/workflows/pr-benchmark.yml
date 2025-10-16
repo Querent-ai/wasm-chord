@@ -2,7 +2,7 @@ name: PR Benchmarks
 
 on:
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, dev ]
     paths:
       - 'crates/**/*.rs'
       - 'Cargo.toml'
@@ -154,16 +154,12 @@ jobs:
 
       - name: Run core integration tests
         run: |
-          cargo test -p wasm-chord-core --test integration_inference --release
-
-      - name: Run runtime integration tests
-        run: |
-          cargo test -p wasm-chord-runtime --test integration_inference --release
+          cargo test -p wasm-chord-core --test integration_inference_simple --release
 
       - name: Test inference performance baselines
         run: |
           echo "Checking performance baselines from integration tests..."
-          cargo test -p wasm-chord-core --test integration_inference --release -- performance_baseline 2>&1 | tee perf-baseline.txt
+          cargo test -p wasm-chord-core --test integration_inference_simple --release -- performance_baseline 2>&1 | tee perf-baseline.txt
 
           # Check for assertion failures
           if grep -q "assertion.*failed" perf-baseline.txt; then

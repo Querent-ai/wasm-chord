@@ -1,19 +1,23 @@
 //! WebAssembly bindings for browser usage
-#![cfg(target_arch = "wasm32")]
+//!
+//! Note: Using Arc<Mutex<T>> for WASM is intentional for consistency with potential
+//! future multi-threaded WASM support (when SharedArrayBuffer is available).
+#![allow(clippy::arc_with_non_send_sync)]
 
 use crate::{
     ChatMessage, ChatRole, ChatTemplate, GenerationConfig, Model as RustModel, TransformerConfig,
 };
 use std::io::Cursor;
+use std::sync::{Arc, Mutex};
 use wasm_bindgen::prelude::*;
 use wasm_chord_core::{GGUFParser, TensorLoader, Tokenizer};
 
 /// JavaScript-compatible Model wrapper
 #[wasm_bindgen]
 pub struct WasmModel {
-    model: RustModel,
-    tokenizer: Tokenizer,
-    config: GenerationConfig,
+    model: Arc<Mutex<RustModel>>,
+    tokenizer: Arc<Tokenizer>,
+    config: Arc<Mutex<GenerationConfig>>,
 }
 
 #[wasm_bindgen]
@@ -62,7 +66,11 @@ impl WasmModel {
             .load_from_gguf(&mut tensor_loader, &mut parser)
             .map_err(|e| JsValue::from_str(&format!("Failed to load weights: {}", e)))?;
 
-        Ok(WasmModel { model, tokenizer, config: GenerationConfig::default() })
+        Ok(WasmModel {
+            model: Arc::new(Mutex::new(model)),
+            tokenizer: Arc::new(tokenizer),
+            config: Arc::new(Mutex::new(GenerationConfig::default())),
+        })
     }
 
     /// Set generation configuration
@@ -74,7 +82,8 @@ impl WasmModel {
         top_k: u32,
         repetition_penalty: f32,
     ) {
-        self.config = GenerationConfig {
+        let mut config = self.config.lock().unwrap();
+        *config = GenerationConfig {
             max_tokens,
             temperature,
             top_p,
@@ -85,8 +94,15 @@ impl WasmModel {
 
     /// Generate text (blocking)
     pub fn generate(&mut self, prompt: &str) -> Result<String, JsValue> {
-        self.model
-            .generate(prompt, &self.tokenizer, &self.config)
+        let model = self.model.clone();
+        let tokenizer = self.tokenizer.clone();
+        let config = self.config.clone();
+
+        let mut model_guard = model.lock().unwrap();
+        let config_guard = config.lock().unwrap();
+
+        model_guard
+            .generate(prompt, &tokenizer, &config_guard)
             .map_err(|e| JsValue::from_str(&format!("Generation failed: {}", e)))
     }
 
@@ -97,10 +113,16 @@ impl WasmModel {
         prompt: &str,
         callback: &js_sys::Function,
     ) -> Result<String, JsValue> {
+        let model = self.model.clone();
+        let tokenizer = self.tokenizer.clone();
+        let config = self.config.clone();
+
+        let mut model_guard = model.lock().unwrap();
+        let config_guard = config.lock().unwrap();
         let this = JsValue::null();
 
-        self.model
-            .generate_stream(prompt, &self.tokenizer, &self.config, |_token_id, token_text| {
+        model_guard
+            .generate_stream(prompt, &tokenizer, &config_guard, |_token_id, token_text| {
                 let token_js = JsValue::from_str(token_text);
                 if let Ok(result) = callback.call1(&this, &token_js) {
                     result.as_bool().unwrap_or(true)
@@ -113,16 +135,62 @@ impl WasmModel {
 
     /// Generate with async iterator (returns AsyncTokenStream)
     /// Usage: for await (const token of model.generate_async(prompt)) { ... }
-    pub fn generate_async(&mut self, prompt: String) -> AsyncTokenStream {
-        AsyncTokenStream::new(prompt, self.config.clone())
+    pub fn generate_async(&self, prompt: String) -> AsyncTokenStream {
+        AsyncTokenStream::new(
+            prompt,
+            self.model.clone(),
+            self.tokenizer.clone(),
+            self.config.clone(),
+        )
     }
 
-    /// Initialize GPU backend (if available)
+    /// Initialize GPU backend asynchronously (if available)
     #[cfg(feature = "webgpu")]
-    pub fn init_gpu(&mut self) -> Result<(), JsValue> {
-        self.model
+    pub async fn init_gpu_async(&self) -> Result<(), JsValue> {
+        let model = self.model.clone();
+
+        // Since init_gpu is sync, we use JsFuture to yield to event loop
+        let promise = js_sys::Promise::resolve(&JsValue::undefined());
+        wasm_bindgen_futures::JsFuture::from(promise).await.ok();
+
+        // Now do GPU init
+        let mut model_guard = model.lock().unwrap();
+        model_guard
+            .init_gpu()
+            .map_err(|e| JsValue::from_str(&format!("GPU initialization failed: {}", e)))?;
+
+        web_sys::console::log_1(&"✅ GPU backend initialized successfully".into());
+        Ok(())
+    }
+
+    /// Initialize GPU backend (blocking fallback)
+    #[cfg(feature = "webgpu")]
+    pub fn init_gpu(&self) -> Result<(), JsValue> {
+        let model = self.model.clone();
+        let mut model_guard = model.lock().unwrap();
+        model_guard
             .init_gpu()
             .map_err(|e| JsValue::from_str(&format!("GPU initialization failed: {}", e)))
+    }
+
+    /// Check if GPU is available
+    #[cfg(feature = "webgpu")]
+    pub fn is_gpu_available() -> bool {
+        wasm_chord_gpu::GpuBackend::is_available()
+    }
+
+    /// Get model info
+    pub fn get_model_info(&self) -> Result<JsValue, JsValue> {
+        let model_guard = self.model.lock().unwrap();
+        let info = js_sys::Object::new();
+
+        js_sys::Reflect::set(&info, &"vocab_size".into(), &model_guard.config.vocab_size.into())?;
+        js_sys::Reflect::set(&info, &"hidden_size".into(), &model_guard.config.hidden_size.into())?;
+        js_sys::Reflect::set(&info, &"num_layers".into(), &model_guard.config.num_layers.into())?;
+        js_sys::Reflect::set(&info, &"num_heads".into(), &model_guard.config.num_heads.into())?;
+        js_sys::Reflect::set(&info, &"max_seq_len".into(), &model_guard.config.max_seq_len.into())?;
+
+        Ok(info.into())
     }
 }
 
@@ -130,27 +198,65 @@ impl WasmModel {
 #[wasm_bindgen]
 pub struct AsyncTokenStream {
     prompt: String,
-    config: GenerationConfig,
+    model: Arc<Mutex<RustModel>>,
+    tokenizer: Arc<Tokenizer>,
+    config: Arc<Mutex<GenerationConfig>>,
     tokens: Vec<String>,
     current_index: usize,
+    is_complete: bool,
 }
 
 #[wasm_bindgen]
 impl AsyncTokenStream {
     /// Create a new async token stream
-    fn new(prompt: String, config: GenerationConfig) -> Self {
-        Self { prompt, config, tokens: Vec::new(), current_index: 0 }
+    fn new(
+        prompt: String,
+        model: Arc<Mutex<RustModel>>,
+        tokenizer: Arc<Tokenizer>,
+        config: Arc<Mutex<GenerationConfig>>,
+    ) -> Self {
+        Self {
+            prompt,
+            model,
+            tokenizer,
+            config,
+            tokens: Vec::new(),
+            current_index: 0,
+            is_complete: false,
+        }
     }
 
     /// Get next token (async iterator protocol)
     /// Returns {value: string, done: boolean}
     pub async fn next(&mut self) -> Result<JsValue, JsValue> {
-        // This is a simplified implementation
-        // In a real implementation, we'd need to:
-        // 1. Keep model state between calls
-        // 2. Generate one token at a time
-        // 3. Return each token as it's generated
+        // If we haven't generated tokens yet, do the full generation
+        if self.tokens.is_empty() && !self.is_complete {
+            let model = self.model.clone();
+            let tokenizer = self.tokenizer.clone();
+            let config = self.config.clone();
+            let prompt = self.prompt.clone();
 
+            // Yield to event loop
+            let promise = js_sys::Promise::resolve(&JsValue::undefined());
+            wasm_bindgen_futures::JsFuture::from(promise).await.ok();
+
+            // Generate tokens
+            let mut model_guard = model.lock().unwrap();
+            let config_guard = config.lock().unwrap();
+
+            match model_guard.generate(&prompt, &tokenizer, &config_guard) {
+                Ok(result) => {
+                    self.tokens = result.chars().map(|c| c.to_string()).collect::<Vec<String>>();
+                }
+                Err(_) => {
+                    self.tokens = vec!["Error generating tokens".to_string()];
+                }
+            }
+
+            self.is_complete = true;
+        }
+
+        // Return the next token
         if self.current_index < self.tokens.len() {
             let token = self.tokens[self.current_index].clone();
             self.current_index += 1;
@@ -171,10 +277,23 @@ impl AsyncTokenStream {
     pub fn get_async_iterator(&self) -> AsyncTokenStream {
         AsyncTokenStream {
             prompt: self.prompt.clone(),
+            model: self.model.clone(),
+            tokenizer: self.tokenizer.clone(),
             config: self.config.clone(),
-            tokens: self.tokens.clone(),
+            tokens: Vec::new(),
             current_index: 0,
+            is_complete: false,
         }
+    }
+
+    /// Check if stream is complete
+    pub fn is_complete(&self) -> bool {
+        self.is_complete && self.current_index >= self.tokens.len()
+    }
+
+    /// Get total token count
+    pub fn token_count(&self) -> usize {
+        self.tokens.len()
     }
 }
 
