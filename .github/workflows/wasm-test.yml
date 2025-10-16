@@ -60,17 +60,23 @@ jobs:
       - name: Build WASM (Node.js target)
         run: |
           cd crates/wasm-chord-runtime
-          wasm-pack build --target nodejs --out-dir ../../examples/wasm-capital-test/runtime-pkg-node
+          wasm-pack build --target nodejs
+          mkdir -p ../../examples/wasm-capital-test/runtime-pkg-node
+          cp -r pkg/* ../../examples/wasm-capital-test/runtime-pkg-node/
 
       - name: Build WASM (Web target - CPU only)
         run: |
           cd crates/wasm-chord-runtime
-          wasm-pack build --target web --out-dir ../../examples/wasm-capital-test/runtime-pkg-cpu
+          wasm-pack build --target web
+          mkdir -p ../../examples/wasm-capital-test/runtime-pkg-cpu
+          cp -r pkg/* ../../examples/wasm-capital-test/runtime-pkg-cpu/
 
       - name: Build WASM (Web target - WebGPU)
         run: |
           cd crates/wasm-chord-runtime
-          wasm-pack build --target web --features webgpu --out-dir ../../examples/wasm-capital-test/runtime-pkg-webgpu
+          wasm-pack build --target web --features webgpu
+          mkdir -p ../../examples/wasm-capital-test/runtime-pkg-webgpu
+          cp -r pkg/* ../../examples/wasm-capital-test/runtime-pkg-webgpu/
 
       - name: Verify builds
         run: |
@@ -81,7 +87,7 @@ jobs:
           ls -lh examples/wasm-capital-test/runtime-pkg-cpu/
           echo ""
           echo "Web WebGPU build:"
-          ls -lh examples/wasm-chord-runtime/runtime-pkg-webgpu/
+          ls -lh examples/wasm-capital-test/runtime-pkg-webgpu/
 
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@v4
