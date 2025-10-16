@@ -1,5 +1,8 @@
 //! WebAssembly bindings for browser usage
-#![cfg(target_arch = "wasm32")]
+//!
+//! Note: Using Arc<Mutex<T>> for WASM is intentional for consistency with potential
+//! future multi-threaded WASM support (when SharedArrayBuffer is available).
+#![allow(clippy::arc_with_non_send_sync)]
 
 use crate::{
     ChatMessage, ChatRole, ChatTemplate, GenerationConfig, Model as RustModel, TransformerConfig,
