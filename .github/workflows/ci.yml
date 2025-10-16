@@ -191,10 +191,9 @@ jobs:
         run: |
           echo "🔨 Building integration examples..."
           cargo build --release --manifest-path examples/abi-tests/Cargo.toml
-          # Note: integration_tests is not a cargo package, just test files
+          # Note: integration_tests and quality-test are not in workspace
           cargo build --release --manifest-path examples/ollama-comparison/Cargo.toml
           cargo build --release --manifest-path examples/ollama-comprehensive-test/Cargo.toml
-          cargo build --release --manifest-path examples/quality-test/Cargo.toml
           cargo build --release --manifest-path examples/model-coherence-test/Cargo.toml
           echo "✅ Integration examples built successfully"
 
