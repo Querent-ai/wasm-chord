@@ -44,14 +44,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔬 GPU vs CPU Correctness Test");
     println!("================================\n");
 
-    #[cfg(not(feature = "gpu"))]
+    #[cfg(not(feature = "webgpu"))]
     {
-        eprintln!("❌ GPU feature not enabled!");
-        eprintln!("   Run with: cargo run --release --manifest-path examples/gpu-cpu-comparison/Cargo.toml --features gpu");
+        eprintln!("❌ WebGPU feature not enabled!");
+        eprintln!("   Run with: cargo run --release --manifest-path examples/gpu-cpu-comparison/Cargo.toml --features webgpu");
         std::process::exit(1);
     }
 
-    #[cfg(feature = "gpu")]
+    #[cfg(feature = "webgpu")]
     {
         let model_path = "/home/puneet/.ollama/models/tinyllama-1.1b.Q4_K_M.gguf";
 

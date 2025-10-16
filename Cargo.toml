@@ -28,6 +28,7 @@ members = [
     "examples/debug-embedding-step",
     "examples/check-embedding-format",
     "examples/test-rmsnorm",
+    "examples/abi-tests",
     "examples/vocab-check",
     "examples/argmax-test",
     "examples/streaming-inference",

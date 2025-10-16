@@ -1,0 +1,26 @@
+[package]
+name = "abi-tests"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+cuda = ["wasm-chord-runtime/cuda"]
+
+[[bin]]
+name = "capital-test"
+path = "src/capital_test.rs"
+
+[[bin]]
+name = "direct-test"
+path = "src/direct_test.rs"
+
+[[bin]]
+name = "serialization-test"
+path = "src/serialization_test.rs"
+
+[dependencies]
+wasm-chord-runtime = { workspace = true }
+wasm-chord-core = { workspace = true }
+anyhow = "1.0"
+

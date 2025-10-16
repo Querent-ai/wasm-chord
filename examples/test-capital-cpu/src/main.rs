@@ -60,9 +60,24 @@ fn main() -> Result<()> {
     model.load_from_gguf(&mut tensor_loader, &mut parser)?;
     println!("✅ Weights loaded\n");
 
+    // Initialize GPU if available
+    #[cfg(feature = "webgpu")]
+    {
+        println!("🎮 Initializing WebGPU backend...");
+        match model.init_gpu() {
+            Ok(_) => println!("✅ WebGPU enabled\n"),
+            Err(e) => println!("⚠️  WebGPU init failed (falling back to CPU): {}\n", e),
+        }
+    }
+
     // Test prompt
     let prompt = "What is the capital of France?";
     println!("📝 Prompt: \"{}\"", prompt);
+
+    #[cfg(feature = "webgpu")]
+    println!("🤖 Generating response (WebGPU-accelerated)...\n");
+
+    #[cfg(not(feature = "webgpu"))]
     println!("🤖 Generating response (CPU-only)...\n");
 
     // Generation config
