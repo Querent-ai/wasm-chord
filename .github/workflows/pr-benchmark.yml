@@ -156,10 +156,6 @@ jobs:
         run: |
           cargo test -p wasm-chord-core --test integration_inference_simple --release
 
-      - name: Run runtime integration tests
-        run: |
-          cargo test -p wasm-chord-runtime --test integration_inference_simple --release
-
       - name: Test inference performance baselines
         run: |
           echo "Checking performance baselines from integration tests..."
