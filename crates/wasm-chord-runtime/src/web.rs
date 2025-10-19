@@ -13,7 +13,7 @@ use wasm_bindgen::prelude::*;
 use wasm_chord_core::{GGUFParser, TensorLoader, Tokenizer};
 
 /// JavaScript-compatible Model wrapper
-/// 
+///
 /// Note: This is for browser usage only. For large models (>4GB), use the native
 /// Memory64 runtime instead of the browser version.
 #[wasm_bindgen]
@@ -26,13 +26,13 @@ pub struct WasmModel {
 #[wasm_bindgen]
 impl WasmModel {
     /// Load model from GGUF bytes (browser-compatible)
-    /// 
+    ///
     /// Note: This is limited to models <4GB due to browser WASM memory constraints.
     /// For larger models, use the native Memory64 runtime.
     #[wasm_bindgen(constructor)]
     pub fn new(gguf_bytes: &[u8]) -> Result<WasmModel, JsValue> {
         web_sys::console::log_1(&"🚀 Loading model for browser...".into());
-        
+
         // Parse GGUF
         let cursor = Cursor::new(gguf_bytes);
         let mut parser = GGUFParser::new(cursor);
@@ -47,11 +47,12 @@ impl WasmModel {
         // Check model size
         let total_size: u64 = meta.tensors.iter().map(|t| t.size_bytes as u64).sum();
         let size_gb = total_size as f64 / 1_000_000_000.0;
-        
+
         web_sys::console::log_1(&format!("📊 Model size: {:.2} GB", size_gb).into());
 
         // Browser limitation: models must be <4GB
-        if total_size > 3_500_000_000 { // 3.5GB safety margin
+        if total_size > 3_500_000_000 {
+            // 3.5GB safety margin
             return Err(JsValue::from_str(&format!(
                 "Model too large ({:.2} GB) for browser WASM memory. Browser limit is ~4GB. \
                 For large models, use the native Memory64 runtime instead.",
@@ -237,7 +238,6 @@ pub struct AsyncTokenStream {
 
 #[wasm_bindgen]
 impl AsyncTokenStream {
-
     /// Get next token (async iterator protocol)
     /// Returns {value: string, done: boolean}
     pub async fn next(&mut self) -> Result<JsValue, JsValue> {
