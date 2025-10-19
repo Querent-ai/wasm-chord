@@ -30,6 +30,10 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 rand = "0.9.2"
 pollster = { version = "0.4.0", optional = true }
+anyhow = { version = "1.0", optional = true }
+wasmtime = { version = "29.0.0", optional = true }
+parking_lot = { version = "0.12.5", optional = true }
+log = { version = "0.4", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { workspace = true }
@@ -47,7 +51,9 @@ default = []  # CPU-only by default (smallest, works everywhere)
 cuda = ["dep:wasm-chord-gpu", "wasm-chord-gpu/cuda"]  # Candle GPU with CUDA (NVIDIA)
 metal = ["dep:wasm-chord-gpu", "wasm-chord-gpu/metal"]  # Candle GPU with Metal (Apple)
 webgpu = ["dep:wasm-chord-gpu", "wasm-chord-gpu/default", "pollster"]  # WebGPU for browsers
-memory64 = []
+memory64 = ["memory64-host", "memory64-wasm"]  # Full Memory64 support (host + WASM)
+memory64-host = ["dep:anyhow", "dep:wasmtime", "dep:parking_lot", "log"]  # Memory64 host runtime (Wasmtime)
+memory64-wasm = ["dep:anyhow"]  # Memory64 WASM-side FFI bindings
 
 [[bench]]
 name = "attention"
