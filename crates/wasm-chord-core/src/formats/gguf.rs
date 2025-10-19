@@ -8,9 +8,6 @@ use std::io::{Read, Seek, SeekFrom};
 /// GGUF magic number
 const GGUF_MAGIC: u32 = 0x46554747; // "GGUF"
 
-/// GGUF version (currently 3)
-const GGUF_VERSION: u32 = 3;
-
 /// GGUF metadata value types
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -478,6 +475,7 @@ mod tests {
     #[test]
     fn test_gguf_magic() {
         // Create minimal GGUF header
+        const GGUF_VERSION: u32 = 3;
         let mut data = Vec::new();
         data.extend_from_slice(&GGUF_MAGIC.to_le_bytes());
         data.extend_from_slice(&GGUF_VERSION.to_le_bytes());
@@ -488,7 +486,7 @@ mod tests {
         let mut parser = GGUFParser::new(cursor);
 
         let meta = parser.parse_header().unwrap();
-        assert_eq!(meta.version, GGUF_VERSION);
+        assert_eq!(meta.version, GGUF_VERSIONlet mut allocator = WasmMemory64Allocator:);
         assert_eq!(meta.tensor_count, 0);
     }
 }
