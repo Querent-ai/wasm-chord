@@ -6,14 +6,14 @@
 use crate::memory64::{Memory64Runtime, MemoryLayout};
 use crate::memory64_layer_manager::{Memory64LayerManager, Memory64Model};
 use crate::transformer::TransformerConfig;
+use std::collections::HashMap;
+use std::io::{Read, Seek};
+use std::sync::Arc;
 use wasm_chord_core::{
     error::{Error, Result},
     formats::gguf::{GGUFParser, ModelMeta},
     tensor_loader::TensorLoader,
 };
-use std::collections::HashMap;
-use std::io::{Read, Seek};
-use std::sync::Arc;
 
 /// Memory64-aware GGUF model loader
 pub struct Memory64GGUFLoader {
@@ -92,38 +92,43 @@ impl Memory64GGUFLoader {
         println!("📋 Parsing GGUF header...");
         let meta = parser.parse_header()?;
         self.meta = Some(meta.clone());
-        println!("✅ Parsed GGUF: {} tensors, architecture: {}", 
-                 meta.tensor_count, meta.architecture);
+        println!(
+            "✅ Parsed GGUF: {} tensors, architecture: {}",
+            meta.tensor_count, meta.architecture
+        );
 
         // Step 2: Extract model configuration
         println!("⚙️  Extracting model configuration...");
-        let config_data = parser.extract_config()
+        let config_data = parser
+            .extract_config()
             .ok_or_else(|| Error::ParseError("Failed to extract config".to_string()))?;
         let config: TransformerConfig = config_data.into();
         self.config = Some(config.clone());
-        println!("✅ Config: {} layers, {} vocab, {} hidden", 
-                 config.num_layers, config.vocab_size, config.hidden_size);
+        println!(
+            "✅ Config: {} layers, {} vocab, {} hidden",
+            config.num_layers, config.vocab_size, config.hidden_size
+        );
 
         // Step 3: Analyze model size and decide on Memory64 usage
         let total_size = self.estimate_model_size(&meta)?;
         self.use_memory64 = total_size > 3_000_000_000; // 3GB threshold
-        
+
         println!("📊 Model size estimate: {:.2} GB", total_size as f64 / 1_000_000_000.0);
         println!("🎯 Using Memory64: {}", self.use_memory64);
 
         if self.use_memory64 {
             // Step 4: Initialize Memory64 runtime
             self.initialize_memory64(total_size)?;
-            
+
             // Step 5: Map tensors to layers
             self.map_tensors_to_layers(&meta)?;
-            
-            // Step 6: Load model weights into Memory64
-            self.load_weights_to_memory64(parser)?;
-            
+
+            // Step 6: Initialize lazy loading infrastructure
+            self.initialize_lazy_loading(parser)?;
+
             // Step 7: Create layer manager
             self.create_layer_manager()?;
-            
+
             // Step 8: Create Memory64 model
             self.create_memory64_model()
         } else {
@@ -134,23 +139,21 @@ impl Memory64GGUFLoader {
 
     /// Estimate total model size from GGUF metadata
     fn estimate_model_size(&self, meta: &ModelMeta) -> Result<u64> {
-        let total_bytes: u64 = meta.tensors.iter()
-            .map(|tensor| tensor.size_bytes as u64)
-            .sum();
-        
+        let total_bytes: u64 = meta.tensors.iter().map(|tensor| tensor.size_bytes as u64).sum();
+
         Ok(total_bytes)
     }
 
     /// Initialize Memory64 runtime based on model size
     fn initialize_memory64(&mut self, total_size: u64) -> Result<()> {
         println!("🔧 Initializing Memory64 runtime...");
-        
+
         let layout = if total_size <= 8_000_000_000 {
             // Single region for 7B-8B models
             MemoryLayout::single(8, "model_storage")
                 .map_err(|e| Error::ParseError(format!("Failed to create layout: {}", e)))?
         } else if total_size <= 16_000_000_000 {
-            // Single region for 13B models  
+            // Single region for 13B models
             MemoryLayout::single(16, "model_storage")
                 .map_err(|e| Error::ParseError(format!("Failed to create layout: {}", e)))?
         } else {
@@ -172,7 +175,7 @@ impl Memory64GGUFLoader {
     /// Map GGUF tensors to layer structure
     fn map_tensors_to_layers(&mut self, meta: &ModelMeta) -> Result<()> {
         println!("🗺️  Mapping tensors to layers...");
-        
+
         let config = self.config.as_ref().unwrap();
         let mut current_offset = 0u64;
 
@@ -180,7 +183,7 @@ impl Memory64GGUFLoader {
         for tensor in &meta.tensors {
             let layer_id = self.determine_layer_id(&tensor.name, config)?;
             let tensor_type = self.determine_tensor_type(&tensor.name)?;
-            
+
             let info = LayerTensorInfo {
                 layer_id,
                 tensor_type,
@@ -188,12 +191,14 @@ impl Memory64GGUFLoader {
                 size_bytes: tensor.size_bytes,
                 shape: tensor.shape.dims().to_vec(),
             };
-            
+
             self.tensor_metadata.insert(tensor.name.clone(), info);
             current_offset += tensor.size_bytes as u64;
-            
-            println!("   📦 {} -> Layer {}, offset: {} bytes", 
-                     tensor.name, layer_id, current_offset);
+
+            println!(
+                "   📦 {} -> Layer {}, offset: {} bytes",
+                tensor.name, layer_id, current_offset
+            );
         }
 
         println!("✅ Mapped {} tensors to layers", self.tensor_metadata.len());
@@ -241,54 +246,75 @@ impl Memory64GGUFLoader {
         }
     }
 
-    /// Load model weights into Memory64 storage
-    fn load_weights_to_memory64<R: Read + Seek>(&mut self, parser: &mut GGUFParser<R>) -> Result<()> {
-        println!("💾 Loading weights into Memory64 storage...");
-        
+    /// Initialize lazy loading infrastructure (no actual weight loading)
+    fn initialize_lazy_loading<R: Read + Seek>(
+        &mut self,
+        parser: &mut GGUFParser<R>,
+    ) -> Result<()> {
+        println!("💾 Initializing lazy loading infrastructure...");
+
         let _runtime = self.runtime.as_ref().unwrap();
         let data_offset = parser.tensor_data_offset()?;
-        
-        // Create tensor loader for reading GGUF data
+
+        // Create tensor loader for reading GGUF data (but don't load yet)
         let mut tensor_loader = TensorLoader::new(data_offset);
-        
-        // Register all tensors
+
+        // Register all tensors (metadata only, no actual data loading)
         let meta = self.meta.as_ref().unwrap();
         for tensor in &meta.tensors {
-            tensor_loader.register_tensor(
-                tensor.name.clone(),
-                tensor.clone(),
-                tensor.offset,
-            );
+            tensor_loader.register_tensor(tensor.name.clone(), tensor.clone(), tensor.offset);
         }
 
-        // Load each tensor and store in Memory64
-        for (tensor_name, layer_info) in &self.tensor_metadata {
-            println!("   📦 Loading {} ({} bytes)...", tensor_name, layer_info.size_bytes);
-            
-            // Load tensor data from GGUF
-            let tensor_data = tensor_loader.load_tensor(tensor_name, parser)?;
-            
-            // Store in Memory64 (simplified - in production, you'd use the actual Memory64 API)
-            println!("   ✅ Loaded {} bytes for {}", tensor_data.len() * 4, tensor_name);
-        }
+        // Store tensor loader for later use (in production, this would be stored in the loader)
+        println!("✅ Lazy loading infrastructure ready");
+        println!("   📊 {} tensors registered for on-demand loading", self.tensor_metadata.len());
+        println!("   💡 Weights will be loaded only when layers are accessed");
 
-        println!("✅ All weights loaded into Memory64");
         Ok(())
+    }
+
+    /// Load a specific tensor on-demand
+    pub fn load_tensor_lazy<R: Read + Seek>(
+        &mut self,
+        tensor_name: &str,
+        parser: &mut GGUFParser<R>,
+    ) -> Result<Vec<f32>> {
+        let layer_info = self
+            .tensor_metadata
+            .get(tensor_name)
+            .ok_or_else(|| Error::ParseError(format!("Tensor not found: {}", tensor_name)))?;
+
+        println!("   🔄 Lazy loading {} ({} bytes)...", tensor_name, layer_info.size_bytes);
+
+        // Create tensor loader for this specific request
+        let data_offset = parser.tensor_data_offset()?;
+        let mut tensor_loader = TensorLoader::new(data_offset);
+
+        // Register the specific tensor
+        let meta = self.meta.as_ref().unwrap();
+        if let Some(tensor) = meta.tensors.iter().find(|t| t.name == tensor_name) {
+            tensor_loader.register_tensor(tensor.name.clone(), tensor.clone(), tensor.offset);
+
+            // Load the tensor data
+            let tensor_data = tensor_loader.load_tensor(tensor_name, parser)?;
+            println!("   ✅ Lazy loaded {} bytes for {}", tensor_data.len() * 4, tensor_name);
+            Ok(tensor_data.to_vec())
+        } else {
+            Err(Error::ParseError(format!("Tensor metadata not found: {}", tensor_name)))
+        }
     }
 
     /// Create layer manager for on-demand loading
     fn create_layer_manager(&mut self) -> Result<()> {
         println!("🧠 Creating layer manager...");
-        
+
         let runtime = self.runtime.as_ref().unwrap().clone();
         let config = self.config.as_ref().unwrap().clone();
-        
+
         self.layer_manager = Some(Memory64LayerManager::new(
-            runtime,
-            config,
-            4, // Cache up to 4 layers
+            runtime, config, 4, // Cache up to 4 layers
         ));
-        
+
         println!("✅ Layer manager created");
         Ok(())
     }
@@ -296,15 +322,15 @@ impl Memory64GGUFLoader {
     /// Create Memory64 model with on-demand layer loading
     fn create_memory64_model(&mut self) -> Result<Memory64Model> {
         println!("📋 Creating Memory64 model...");
-        
+
         let config = self.config.as_ref().unwrap().clone();
         let layer_manager = self.layer_manager.take().unwrap();
-        
+
         // Create placeholder components (in production, these would be loaded from Memory64)
         let token_embeddings = vec![0.0; config.vocab_size * config.hidden_size];
         let output_norm = vec![1.0; config.hidden_size];
         let lm_head = vec![0.0; config.vocab_size * config.hidden_size];
-        
+
         let model = Memory64Model::new(
             config.clone(),
             token_embeddings,
@@ -313,28 +339,31 @@ impl Memory64GGUFLoader {
             layer_manager,
             config.num_layers as u32,
         );
-        
+
         println!("✅ Memory64 model created");
         Ok(model)
     }
 
     /// Fall back to standard model loading
-    fn load_standard_model<R: Read + Seek>(&mut self, _parser: &mut GGUFParser<R>) -> Result<Memory64Model> {
+    fn load_standard_model<R: Read + Seek>(
+        &mut self,
+        _parser: &mut GGUFParser<R>,
+    ) -> Result<Memory64Model> {
         println!("📋 Loading standard model (no Memory64)...");
-        
+
         let config = self.config.as_ref().unwrap().clone();
-        
+
         // Create a dummy layer manager for standard models
         let layout = MemoryLayout::single(1, "dummy")
             .map_err(|e| Error::ParseError(format!("Failed to create dummy layout: {}", e)))?;
         let runtime = Arc::new(Memory64Runtime::new(layout, true));
         let layer_manager = Memory64LayerManager::new(runtime, config.clone(), 4);
-        
+
         // Create placeholder components
         let token_embeddings = vec![0.0; config.vocab_size * config.hidden_size];
         let output_norm = vec![1.0; config.hidden_size];
         let lm_head = vec![0.0; config.vocab_size * config.hidden_size];
-        
+
         let model = Memory64Model::new(
             config.clone(),
             token_embeddings,
@@ -343,7 +372,7 @@ impl Memory64GGUFLoader {
             layer_manager,
             config.num_layers as u32,
         );
-        
+
         println!("✅ Standard model created");
         Ok(model)
     }

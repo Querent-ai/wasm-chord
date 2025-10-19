@@ -17,13 +17,14 @@ fn main() -> Result<()> {
 
     // Step 1: Set up Memory64 runtime
     println!("🔧 Setting up Memory64 runtime...");
-    let layout = MemoryLayout::single(8, "model_storage")
-        .map_err(|e| wasm_chord_core::error::Error::ParseError(format!("Failed to create layout: {}", e)))?;
+    let layout = MemoryLayout::single(8, "model_storage").map_err(|e| {
+        wasm_chord_core::error::Error::ParseError(format!("Failed to create layout: {}", e))
+    })?;
     let runtime = Arc::new(Memory64Runtime::new(layout, true));
-    
+
     // Initialize with a mock store (in production, this would be a real Wasmtime store)
     // For this test, we'll simulate the layer loading
-    
+
     println!("✅ Memory64 runtime initialized");
 
     // Step 2: Set up model configuration
@@ -39,7 +40,10 @@ fn main() -> Result<()> {
         rope_theta: 10000.0,
         rms_norm_eps: 1e-6,
     };
-    println!("✅ Model configuration: {} layers, {} hidden size", config.num_layers, config.hidden_size);
+    println!(
+        "✅ Model configuration: {} layers, {} hidden size",
+        config.num_layers, config.hidden_size
+    );
 
     // Step 3: Create layer manager
     println!("\n🧠 Creating layer manager...");
@@ -52,12 +56,12 @@ fn main() -> Result<()> {
 
     // Step 5: Create Memory64 model
     println!("\n📋 Creating Memory64 model...");
-    
+
     // Create placeholder embeddings and other components
     let token_embeddings = vec![0.0; config.vocab_size * config.hidden_size];
     let output_norm = vec![1.0; config.hidden_size];
     let lm_head = vec![0.0; config.vocab_size * config.hidden_size];
-    
+
     let mut model = Memory64Model::new(
         config.clone(),
         token_embeddings,
@@ -70,7 +74,7 @@ fn main() -> Result<()> {
 
     // Step 6: Test layer loading
     println!("\n🔄 Testing layer loading...");
-    
+
     // Load first few layers
     for layer_id in 0..5 {
         println!("   Loading layer {}...", layer_id);
@@ -89,7 +93,10 @@ fn main() -> Result<()> {
     // Step 7: Test cache management
     println!("\n📊 Testing cache management...");
     let stats = model.cache_stats();
-    println!("   Cache stats: {} layers cached (max: {})", stats.cached_layers, stats.max_cache_size);
+    println!(
+        "   Cache stats: {} layers cached (max: {})",
+        stats.cached_layers, stats.max_cache_size
+    );
 
     // Step 8: Test preloading
     println!("\n⚡ Testing layer preloading...");
@@ -101,11 +108,11 @@ fn main() -> Result<()> {
     // Step 9: Simulate inference pattern
     println!("\n🎯 Simulating inference pattern...");
     println!("   This shows how layers would be loaded during actual inference:");
-    
+
     // Simulate processing tokens through layers
     for token_pos in 0..3 {
         println!("   Processing token at position {}...", token_pos);
-        
+
         for layer_id in 0..config.num_layers {
             // In real inference, this would call the layer's forward method
             match model.get_layer(layer_id as u32) {
@@ -125,7 +132,17 @@ fn main() -> Result<()> {
     println!("\n📈 Final cache statistics...");
     let final_stats = model.cache_stats();
     println!("   Final cache: {} layers cached", final_stats.cached_layers);
-    println!("   Cache efficiency: {:.1}%", final_stats.cache_hit_rate * 100.0);
+    println!(
+        "   Cache hits: {}, misses: {}, evictions: {}",
+        final_stats.cache_hits, final_stats.cache_misses, final_stats.evictions
+    );
+    let hit_rate = if final_stats.cache_hits + final_stats.cache_misses > 0 {
+        final_stats.cache_hits as f64 / (final_stats.cache_hits + final_stats.cache_misses) as f64
+            * 100.0
+    } else {
+        0.0
+    };
+    println!("   Cache efficiency: {:.1}%", hit_rate);
 
     println!("\n🎉 Memory64 Layer Loading Test Complete!");
     println!("✅ Layer loading system validated");
