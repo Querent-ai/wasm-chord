@@ -8,6 +8,9 @@ use std::io::{Read, Seek, SeekFrom};
 /// GGUF magic number
 const GGUF_MAGIC: u32 = 0x46554747; // "GGUF"
 
+/// GGUF version (currently 3)
+const GGUF_VERSION: u32 = 3;
+
 /// GGUF metadata value types
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
