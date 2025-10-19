@@ -7,7 +7,7 @@ use std::io::{Read, Seek, SeekFrom};
 
 /// GGUF magic number (version 3)
 const GGUF_MAGIC: u32 = 0x46554747; // "GGUF"
-const GGUF_VERSION: u32 = 3;
+const GGUF_VERSION: u32 = 2; // Support both version 2 and 3
 
 /// GGUF metadata value types
 #[repr(u32)]
@@ -118,7 +118,7 @@ impl<R: Read + Seek> GGUFParser<R> {
 
         // Read version
         let version = self.read_u32()?;
-        if version != GGUF_VERSION {
+        if version < 2 || version > 3 {
             return Err(Error::InvalidFormat(format!("Unsupported GGUF version: {}", version)));
         }
 

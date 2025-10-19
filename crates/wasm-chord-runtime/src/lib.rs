@@ -21,6 +21,14 @@ pub mod memory64_ffi;
 #[cfg(feature = "memory64")]
 pub mod memory64_model;
 
+// Memory64 layer management
+#[cfg(feature = "memory64")]
+pub mod memory64_layer_manager;
+
+// Memory64 GGUF integration
+#[cfg(feature = "memory64")]
+pub mod memory64_gguf;
+
 mod multi_memory;
 mod sampling;
 mod sharding;

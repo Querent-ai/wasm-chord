@@ -53,6 +53,8 @@ members = [
     "examples/memory64-integration-test/host",
     "examples/memory64-model-test",
     "examples/gpu-backend-test",
+    "examples/memory64-layer-loading-test",
+    "examples/memory64-gguf-test",
 ]
 
 [workspace.package]
