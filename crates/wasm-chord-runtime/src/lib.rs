@@ -17,6 +17,10 @@ pub mod memory64_host;
 #[cfg(all(feature = "memory64-wasm", target_arch = "wasm32"))]
 pub mod memory64_ffi;
 
+// Memory64-aware model loading
+#[cfg(feature = "memory64")]
+pub mod memory64_model;
+
 mod multi_memory;
 mod sampling;
 mod sharding;

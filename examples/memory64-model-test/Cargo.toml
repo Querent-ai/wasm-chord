@@ -1,0 +1,8 @@
+[package]
+name = "memory64-model-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wasm-chord-core = { workspace = true }
+wasm-chord-runtime = { workspace = true, features = ["memory64"] }
