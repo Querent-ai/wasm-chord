@@ -87,7 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let start = std::time::Instant::now();
-    let response = model.generate(&prompt, &tokenizer, &gen_config)?;
+    let response = model.generate(prompt, &tokenizer, &gen_config)?;
     let duration = start.elapsed();
 
     println!("\n✅ Generation complete!");
