@@ -228,6 +228,8 @@ pub struct Memory64Model {
     layer_manager: Memory64LayerManager,
     /// Number of layers in the model
     num_layers: u32,
+    /// Prefetch distance: how many subsequent layers to pre-load after access
+    prefetch_distance: u32,
 }
 
 impl Memory64Model {
@@ -240,7 +242,15 @@ impl Memory64Model {
         layer_manager: Memory64LayerManager,
         num_layers: u32,
     ) -> Self {
-        Self { config, token_embeddings, output_norm, lm_head, layer_manager, num_layers }
+        Self {
+            config,
+            token_embeddings,
+            output_norm,
+            lm_head,
+            layer_manager,
+            num_layers,
+            prefetch_distance: 1,
+        }
     }
 
     /// Get a specific layer (loads on-demand)
@@ -253,6 +263,20 @@ impl Memory64Model {
             )));
         }
 
+        // Ensure requested layer is loaded
+        let _ = self.layer_manager.load_layer(layer_id)?;
+
+        // Simple synchronous prefetch of subsequent layers (best-effort).
+        // Important: prefetch before returning a reference to avoid borrow conflicts.
+        if self.prefetch_distance > 0 {
+            let max_next =
+                (layer_id + self.prefetch_distance).min(self.num_layers.saturating_sub(1));
+            for next_id in (layer_id + 1)..=max_next {
+                let _ = self.layer_manager.load_layer(next_id);
+            }
+        }
+
+        // Return reference after prefetching is complete
         self.layer_manager.load_layer(layer_id)
     }
 
@@ -270,5 +294,10 @@ impl Memory64Model {
     pub fn preload_all_layers(&mut self) -> Result<()> {
         let layer_ids: Vec<u32> = (0..self.num_layers).collect();
         self.layer_manager.preload_layers(&layer_ids)
+    }
+
+    /// Configure prefetch distance (0 disables prefetch)
+    pub fn set_prefetch_distance(&mut self, distance: u32) {
+        self.prefetch_distance = distance;
     }
 }

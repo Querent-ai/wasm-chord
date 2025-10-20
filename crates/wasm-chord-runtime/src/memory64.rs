@@ -188,7 +188,7 @@ mod tests {
     #[test]
     #[cfg(any(feature = "memory64", feature = "memory64-wasm"))]
     fn test_allocator_basic() {
-        let mut allocator = WasmMemory64Allocator::new(0, 1024 * 1024).unwrap();
+        let allocator = WasmMemory64Allocator::new(0, 1024 * 1024).unwrap();
         assert!(allocator.can_allocate(1000));
         assert_eq!(allocator.size_bytes(), 0);
     }
