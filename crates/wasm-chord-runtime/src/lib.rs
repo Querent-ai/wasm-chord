@@ -7,7 +7,28 @@ mod chat;
 mod context;
 mod inference;
 mod memory;
-mod memory64;
+pub mod memory64;
+
+// Host-side Memory64 runtime (production-hardened)
+#[cfg(feature = "memory64-host")]
+pub mod memory64_host;
+
+// WASM-side Memory64 FFI bindings
+#[cfg(all(feature = "memory64-wasm", target_arch = "wasm32"))]
+pub mod memory64_ffi;
+
+// Memory64-aware model loading
+#[cfg(feature = "memory64")]
+pub mod memory64_model;
+
+// Memory64 layer management
+#[cfg(feature = "memory64")]
+pub mod memory64_layer_manager;
+
+// Memory64 GGUF integration
+#[cfg(feature = "memory64")]
+pub mod memory64_gguf;
+
 mod multi_memory;
 mod sampling;
 mod sharding;
@@ -23,6 +44,19 @@ pub use context::RuntimeContext;
 pub use inference::{GenOptions, GenerationState, InferenceSession};
 pub use memory::{estimate_model_memory, requires_memory64, MemoryAllocator, MemoryConfig};
 pub use memory64::{get_max_memory_size, supports_memory64, WasmMemory64Allocator};
+
+// Re-export Memory64 types (already exported from memory64 module, but keep for convenience)
+#[cfg(feature = "memory64-host")]
+pub use memory64::{
+    LayerInfo, Memory64Runtime, Memory64State, MemoryLayout, MemoryRegion as Memory64Region,
+    MemoryStats,
+};
+
+#[cfg(all(feature = "memory64-wasm", target_arch = "wasm32"))]
+pub use memory64::{
+    get_memory64_stats, is_memory64_enabled, load_layer, read_memory64, Memory64LayerLoader,
+};
+
 pub use multi_memory::{MemoryRegion, MemoryRegionConfig, MultiMemoryLayout};
 pub use sampling::{LogitsProcessor, Sampling};
 pub use sharding::{ShardConfig, ShardingManager, ShardingStrategy};

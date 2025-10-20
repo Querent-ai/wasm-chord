@@ -1,0 +1,13 @@
+[package]
+name = "memory64-integration-host"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+wasmtime = "29.0"
+wasm-chord-runtime = { path = "../../../crates/wasm-chord-runtime", features = ["memory64-host"] }
+
+[[bin]]
+name = "memory64-host"
+path = "src/main.rs"

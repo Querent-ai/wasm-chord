@@ -2,7 +2,7 @@
 
 > High-performance LLM inference runtime for WebAssembly and native platforms
 
-**wasm-chord** is a production-grade inference runtime for Large Language Models (LLMs), designed for deployment across WebAssembly, native, and server environments. Built with Rust, it provides efficient execution of quantized models with GPU acceleration support through CUDA, Metal, and WebGPU.
+**wasm-chord** is an inference runtime for Large Language Models (LLMs), designed for deployment across WebAssembly, native, and server environments. Built with Rust, it provides efficient execution of quantized models with GPU acceleration support through CUDA, Metal, and WebGPU.
 
 [![CI](https://github.com/querent-ai/wasm-chord/workflows/CI/badge.svg)](https://github.com/querent-ai/wasm-chord/actions)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
@@ -27,12 +27,14 @@ The runtime supports the GGUF model format with multiple quantization schemes (Q
 - **Streaming Inference**: Token-by-token generation with callback support
 - **KV Caching**: Efficient attention caching for improved throughput
 - **Chat Templates**: Built-in support for ChatML, Llama2, and Alpaca templates
+- **Memory64 Support**: Run large models (7B-70B+) in WebAssembly with >4GB memory
 
 ### Performance
 - **GPU Acceleration**: WebGPU shaders for browser, Candle backend for CUDA/Metal
 - **Optimized Kernels**: SIMD CPU operations with Rayon parallelism
 - **Memory Efficient**: Quantized weights with on-the-fly dequantization
 - **Batched Operations**: Optimized matrix operations via Candle and gemm crates
+- **Memory64**: Support for >4GB models with overflow protection and pointer validation
 
 ### Production Ready
 - **Stable ABI**: C-compatible interface for host language integration
@@ -151,6 +153,139 @@ model.generate_stream("Hello, how are you?", (token) => {
 });
 ```
 
+### Memory64 for Large Models (7B-70B+)
+
+wasm-chord includes Memory64 support for running large models in WebAssembly environments.
+
+#### When to Use Memory64
+
+Standard WASM has a 4GB memory limit. Use Memory64 when your model exceeds this:
+
+| Model Size | Quantization | Memory Needed | Memory64 Required? |
+|------------|--------------|---------------|-------------------|
+| TinyLlama 1.1B | Q4_K_M | ~1GB | ❌ No (fits in 4GB) |
+| Llama2 7B | Q4_K_M | ~4GB | ✅ Yes (exceeds 4GB) |
+| Llama2 13B | Q4_K_M | ~8GB | ✅ Yes |
+| Llama2 70B | Q4_K_M | ~40GB | ✅ Yes (requires sharding) |
+
+#### Host-Side Setup (Wasmtime/Wasmer)
+
+For Wasmtime hosts running WASM modules with large models:
+
+```rust
+use wasm_chord_runtime::memory64_host::{Memory64Runtime, MemoryLayout};
+use wasmtime::*;
+
+// Create Wasmtime engine with Memory64 support
+let mut config = Config::new();
+config.wasm_memory64(true);
+config.wasm_multi_memory(true);
+let engine = Engine::new(&config)?;
+
+// Create Memory64 layout for 8GB model
+let layout = MemoryLayout::single(8, "model_storage")?;
+let runtime = Memory64Runtime::new(layout, true);
+
+// Add host functions to linker
+let mut linker = Linker::new(&engine);
+runtime.add_to_linker(&mut linker)?;
+
+// Initialize Memory64 in store
+let mut store = Store::new(&engine, ());
+runtime.initialize(&mut store)?;
+
+// Load model weights into Memory64
+runtime.write_model_data(&mut store, 0, &model_weights)?;
+
+// Register layers for on-demand loading
+runtime.register_layer(&mut store, 0, "layer_0", offset, size)?;
+```
+
+#### WASM-Side Usage
+
+In your WASM module, load layers on-demand during inference:
+
+```rust
+use wasm_chord_runtime::memory64_ffi::Memory64LayerLoader;
+
+let loader = Memory64LayerLoader::new();
+
+if loader.is_enabled() {
+    // Load layer weights from Memory64 (managed by host)
+    let mut layer_weights = vec![0u8; 200_000_000]; // 200MB layer
+    loader.load_layer(layer_id, &mut layer_weights)?;
+
+    // Process layer with weights
+    process_layer(&layer_weights)?;
+} else {
+    // Fallback to standard memory loading
+    load_layer_from_standard_memory(layer_id)?;
+}
+```
+
+#### Memory64 Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         Host Process                         │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │           Memory64Runtime (Wasmtime API)              │  │
+│  │                                                        │  │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────┐  │  │
+│  │  │  Memory64    │  │  Memory64    │  │  Memory64  │  │  │
+│  │  │  Instance 1  │  │  Instance 2  │  │  Instance N│  │  │
+│  │  │   (8GB)      │  │   (8GB)      │  │   (8GB)    │  │  │
+│  │  └──────────────┘  └──────────────┘  └────────────┘  │  │
+│  │                                                        │  │
+│  │  Host Functions:                                      │  │
+│  │  • memory64_is_enabled()                             │  │
+│  │  • memory64_load_layer(layer_id, wasm_ptr, size)     │  │
+│  │  • memory64_read(offset, wasm_ptr, size)             │  │
+│  │  • memory64_stats()                                  │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                            ▲                                 │
+│                            │ FFI Calls                       │
+│                            │                                 │
+│  ┌─────────────────────────▼─────────────────────────────┐  │
+│  │              WASM Module (<4GB memory)                 │  │
+│  │                                                        │  │
+│  │  Memory64LayerLoader.load_layer(layer_id, buffer)    │  │
+│  │      ↓                                                │  │
+│  │  Host copies layer from Memory64 → WASM memory       │  │
+│  │      ↓                                                │  │
+│  │  Process layer in WASM memory                        │  │
+│  └────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Features**:
+- Multi-region support: Distribute model across multiple Memory64 instances
+- Layer-based loading: Load layers on-demand during inference
+- Thread-safe: Concurrent access with `parking_lot::Mutex`
+- Overflow protection: Checked arithmetic for all memory operations
+- Feature flags: Independent compilation for host (`memory64-host`) and WASM (`memory64-wasm`)
+
+#### Build with Memory64
+
+```bash
+# Host binary with Memory64 support
+cargo build --release --features memory64-host
+
+# WASM module with Memory64 FFI
+cargo build --release --target wasm32-unknown-unknown --features memory64-wasm
+
+# Full support (both host and WASM)
+cargo build --release --features memory64
+```
+
+#### Example
+
+See `examples/memory64-integration-test/host/` for a complete working example demonstrating:
+- Memory64 instance creation with Wasmtime
+- Multi-region memory layouts (256GB tested)
+- Host function registration
+- Layer data loading and management
+
 ## Architecture
 
 ### Crate Structure
@@ -181,6 +316,9 @@ The runtime automatically selects the best available backend:
 | `cuda` | CUDA GPU support | NVIDIA GPUs on Linux/Windows |
 | `metal` | Metal GPU support | Apple Silicon Macs |
 | `webgpu` | WebGPU support | Browser deployment with GPU |
+| `memory64` | Memory64 support (host + WASM) | Large models (7B-70B+) in WASM |
+| `memory64-host` | Memory64 host runtime only | Wasmtime/Wasmer hosts |
+| `memory64-wasm` | Memory64 WASM FFI only | WASM modules calling host |
 
 ## Supported Models
 
@@ -246,13 +384,13 @@ python -m http.server 8000
 - [x] Tokenizer integration (BPE, SentencePiece)
 - [x] C ABI for host integration
 - [x] WebAssembly bindings (wasm-bindgen)
+- [x] Memory64 support for >4GB models in WASM
+- [x] Multi-memory sharding for large models
 - [x] Comprehensive test suite
 - [x] CI/CD pipeline
 
 ### In Progress
 
-- [ ] Memory64 support for >4GB models in WASM
-- [ ] Multi-memory sharding for large models
 - [ ] Fused kernel optimizations (dequant+GEMM)
 - [ ] Flash Attention implementation
 - [ ] Speculative decoding

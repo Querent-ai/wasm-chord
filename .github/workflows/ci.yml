@@ -59,17 +59,141 @@ jobs:
   lint:
     name: Linting
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        feature_set:
+          - name: "Core Packages"
+            check: "core"
+          - name: "CPU Backend"
+            check: "cpu"
+          - name: "CPU Backend (CUDA)"
+            check: "cpu-cuda"
+          - name: "GPU Backend (WebGPU)"
+            check: "gpu-webgpu"
+          - name: "GPU Backend (CUDA)"
+            check: "gpu-cuda"
+          - name: "Runtime (Default)"
+            check: "runtime-default"
+          - name: "Runtime (Memory64)"
+            check: "runtime-memory64"
+          - name: "Runtime (WebGPU)"
+            check: "runtime-webgpu"
+          - name: "Runtime (CUDA)"
+            check: "runtime-cuda"
+          - name: "Runtime (Memory64+WebGPU)"
+            check: "runtime-memory64-webgpu"
+          - name: "Runtime (Memory64+CUDA)"
+            check: "runtime-memory64-cuda"
+          - name: "Examples"
+            check: "examples"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
+      - name: Cache cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-lint-${{ matrix.feature_set.check }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-lint-${{ matrix.feature_set.check }}-
+            ${{ runner.os }}-cargo-lint-
+            ${{ runner.os }}-cargo-
+
+      - name: Install CUDA toolkit (for CUDA features)
+        if: contains(matrix.feature_set.check, 'cuda')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nvidia-cuda-toolkit
+
       - name: Check formatting
+        if: matrix.feature_set.check == 'core'
         run: cargo fmt --all -- --check
 
-      - name: Run clippy
-        run: cargo clippy --workspace --lib -- -D warnings
+      - name: Clippy - Core Packages
+        if: matrix.feature_set.check == 'core'
+        run: |
+          echo "🔍 Linting core packages..."
+          cargo clippy --package wasm-chord-core --all-features -- -D warnings
+
+      - name: Clippy - CPU Backend
+        if: matrix.feature_set.check == 'cpu'
+        run: |
+          echo "🔍 Linting CPU backend (default)..."
+          cargo clippy --package wasm-chord-cpu --no-default-features -- -D warnings
+
+      - name: Clippy - CPU Backend (CUDA)
+        if: matrix.feature_set.check == 'cpu-cuda'
+        env:
+          CUDA_COMPUTE_CAP: 75
+        run: |
+          echo "🔍 Linting CPU backend (CUDA)..."
+          cargo clippy --package wasm-chord-cpu --features cuda --no-default-features -- -D warnings
+
+      - name: Clippy - GPU Backend (WebGPU)
+        if: matrix.feature_set.check == 'gpu-webgpu'
+        run: |
+          echo "🔍 Linting GPU backend (WebGPU)..."
+          cargo clippy --package wasm-chord-gpu --no-default-features -- -D warnings
+
+      - name: Clippy - GPU Backend (CUDA)
+        if: matrix.feature_set.check == 'gpu-cuda'
+        env:
+          CUDA_COMPUTE_CAP: 75
+        run: |
+          echo "🔍 Linting GPU backend (CUDA)..."
+          cargo clippy --package wasm-chord-gpu --features cuda --no-default-features -- -D warnings
+
+      - name: Clippy - Runtime (Default)
+        if: matrix.feature_set.check == 'runtime-default'
+        run: |
+          echo "🔍 Linting runtime (default)..."
+          cargo clippy --package wasm-chord-runtime -- -D warnings
+
+      - name: Clippy - Runtime (Memory64)
+        if: matrix.feature_set.check == 'runtime-memory64'
+        run: |
+          echo "🔍 Linting runtime (memory64)..."
+          cargo clippy --package wasm-chord-runtime --features memory64 -- -D warnings
+
+      - name: Clippy - Runtime (WebGPU)
+        if: matrix.feature_set.check == 'runtime-webgpu'
+        run: |
+          echo "🔍 Linting runtime (webgpu)..."
+          cargo clippy --package wasm-chord-runtime --features webgpu --no-default-features -- -D warnings
+
+      - name: Clippy - Runtime (CUDA)
+        if: matrix.feature_set.check == 'runtime-cuda'
+        env:
+          CUDA_COMPUTE_CAP: 75
+        run: |
+          echo "🔍 Linting runtime (cuda)..."
+          cargo clippy --package wasm-chord-runtime --features cuda --no-default-features -- -D warnings
+
+      - name: Clippy - Runtime (Memory64+WebGPU)
+        if: matrix.feature_set.check == 'runtime-memory64-webgpu'
+        run: |
+          echo "🔍 Linting runtime (memory64+webgpu)..."
+          cargo clippy --package wasm-chord-runtime --features "memory64,webgpu" -- -D warnings
+
+      - name: Clippy - Runtime (Memory64+CUDA)
+        if: matrix.feature_set.check == 'runtime-memory64-cuda'
+        env:
+          CUDA_COMPUTE_CAP: 75
+        run: |
+          echo "🔍 Linting runtime (memory64+cuda)..."
+          cargo clippy --package wasm-chord-runtime --features "memory64,cuda" -- -D warnings
+
+      - name: Clippy - Examples
+        if: matrix.feature_set.check == 'examples'
+        run: |
+          echo "🔍 Linting examples..."
+          cargo clippy --package memory64-model-test -- -D warnings
 
   wasm:
     name: WASM Build

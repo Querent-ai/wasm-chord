@@ -1,0 +1,8 @@
+[package]
+name = "gpu-backend-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wasm-chord-gpu = { path = "../../crates/wasm-chord-gpu" }
+pollster = "0.3"

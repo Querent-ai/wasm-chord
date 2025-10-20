@@ -5,9 +5,8 @@ use crate::error::{Error, Result};
 use crate::tensor::{DataType, Shape, TensorDesc};
 use std::io::{Read, Seek, SeekFrom};
 
-/// GGUF magic number (version 3)
+/// GGUF magic number
 const GGUF_MAGIC: u32 = 0x46554747; // "GGUF"
-const GGUF_VERSION: u32 = 3;
 
 /// GGUF metadata value types
 #[repr(u32)]
@@ -118,7 +117,7 @@ impl<R: Read + Seek> GGUFParser<R> {
 
         // Read version
         let version = self.read_u32()?;
-        if version != GGUF_VERSION {
+        if !(2..=3).contains(&version) {
             return Err(Error::InvalidFormat(format!("Unsupported GGUF version: {}", version)));
         }
 
@@ -476,6 +475,7 @@ mod tests {
     #[test]
     fn test_gguf_magic() {
         // Create minimal GGUF header
+        const GGUF_VERSION: u32 = 3;
         let mut data = Vec::new();
         data.extend_from_slice(&GGUF_MAGIC.to_le_bytes());
         data.extend_from_slice(&GGUF_VERSION.to_le_bytes());
