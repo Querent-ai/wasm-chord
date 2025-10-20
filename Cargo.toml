@@ -57,6 +57,7 @@ members = [
         "examples/memory64-gguf-test",
         "examples/memory64-lazy-loading-test",
         "examples/web-memory64-test",
+        "examples/memory64-benchmark",
 ]
 
 [workspace.package]

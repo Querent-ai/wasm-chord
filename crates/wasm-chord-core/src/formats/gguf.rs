@@ -486,7 +486,7 @@ mod tests {
         let mut parser = GGUFParser::new(cursor);
 
         let meta = parser.parse_header().unwrap();
-        assert_eq!(meta.version, GGUF_VERSIONlet mut allocator = WasmMemory64Allocator:);
+        assert_eq!(meta.version, GGUF_VERSION);
         assert_eq!(meta.tensor_count, 0);
     }
 }
