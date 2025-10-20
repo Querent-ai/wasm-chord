@@ -34,6 +34,7 @@ anyhow = { version = "1.0", optional = true }
 wasmtime = { version = "29.0.0", optional = true }
 parking_lot = { version = "0.12.5", optional = true }
 log = { version = "0.4", optional = true }
+tokio = { version = "1.0", optional = true, features = ["rt", "rt-multi-thread", "sync", "time"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { workspace = true }
@@ -54,6 +55,7 @@ webgpu = ["dep:wasm-chord-gpu", "wasm-chord-gpu/default", "pollster"]  # WebGPU 
 memory64 = ["memory64-host", "memory64-wasm"]  # Full Memory64 support (host + WASM)
 memory64-host = ["dep:anyhow", "dep:wasmtime", "dep:parking_lot", "log"]  # Memory64 host runtime (Wasmtime)
 memory64-wasm = ["dep:anyhow"]  # Memory64 WASM-side FFI bindings
+async-prefetch = ["dep:tokio", "log", "memory64"]  # Async background prefetch optimization
 
 [[bench]]
 name = "attention"

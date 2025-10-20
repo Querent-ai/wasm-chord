@@ -1,0 +1,8 @@
+[package]
+name = "cache-size-benchmark"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wasm-chord-core = { path = "../../crates/wasm-chord-core" }
+wasm-chord-runtime = { path = "../../crates/wasm-chord-runtime", features = ["memory64"] }

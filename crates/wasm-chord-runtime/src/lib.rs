@@ -29,6 +29,10 @@ pub mod memory64_layer_manager;
 #[cfg(feature = "memory64")]
 pub mod memory64_gguf;
 
+// Async background prefetch optimization
+#[cfg(feature = "async-prefetch")]
+pub mod async_prefetch;
+
 mod multi_memory;
 mod sampling;
 mod sharding;
