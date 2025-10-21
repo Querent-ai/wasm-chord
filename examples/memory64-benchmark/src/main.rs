@@ -119,6 +119,36 @@ fn main() -> Result<()> {
             println!("   ⚡ Hit rate: {:.1}%", hit_rate);
         }
 
+        // Benchmark 4.5: Test Prefetching
+        if expect_memory64 {
+            println!("\n⚡ Benchmark 3.5: Prefetch Performance");
+
+            // Test with prefetch disabled
+            model.set_prefetch_distance(0);
+            let no_prefetch_start = Instant::now();
+            for i in 0..5 {
+                let _ = model.get_layer(i);
+            }
+            let no_prefetch_time = no_prefetch_start.elapsed();
+            println!("   ⏱️  Without prefetch: {:.2}ms", no_prefetch_time.as_secs_f64() * 1000.0);
+
+            // Reset cache
+            model.clear_cache();
+
+            // Test with prefetch enabled (distance=1)
+            model.set_prefetch_distance(1);
+            let prefetch_start = Instant::now();
+            for i in 0..5 {
+                let _ = model.get_layer(i);
+            }
+            let prefetch_time = prefetch_start.elapsed();
+            println!("   ⚡ With prefetch (d=1): {:.2}ms", prefetch_time.as_secs_f64() * 1000.0);
+
+            let improvement =
+                (1.0 - prefetch_time.as_secs_f64() / no_prefetch_time.as_secs_f64()) * 100.0;
+            println!("   📊 Improvement: {:.1}%", improvement);
+        }
+
         // Benchmark 5: Sequential Layer Loading
         println!("\n🔄 Benchmark 4: Sequential Layer Loading");
         let num_layers = 10;

@@ -56,7 +56,7 @@ members = [
         "examples/memory64-layer-loading-test",
         "examples/memory64-gguf-test",
         "examples/memory64-lazy-loading-test",
-        "examples/web-memory64-test",
+        "examples/smart-eviction-benchmark",
         "examples/memory64-benchmark",
 ]
 

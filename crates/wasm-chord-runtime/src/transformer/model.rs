@@ -38,6 +38,9 @@ pub struct Model {
     /// Candle GPU backend for native GPU acceleration (optional, enabled with "cuda" or "metal" features)
     #[cfg(any(feature = "cuda", feature = "metal"))]
     gpu_backend: Option<CandleGpuBackend>,
+    /// Memory64 model for large models (>4GB) with on-demand layer loading
+    #[cfg(feature = "memory64")]
+    pub memory64_model: Option<crate::memory64_layer_manager::Memory64Model>,
 }
 
 /// Transpose a matrix stored in row-major order
@@ -204,6 +207,8 @@ impl Model {
             candle_backend: CandleTensorBackend::new(),
             #[cfg(any(feature = "cuda", feature = "metal"))]
             gpu_backend: CandleGpuBackend::new().ok(),
+            #[cfg(feature = "memory64")]
+            memory64_model: None,
         }
     }
 
@@ -367,6 +372,62 @@ impl Model {
         // eprintln!("🧪 Running focused debugging...");
         // super::focused_debug::run_focused_debugging()?;
         // eprintln!("✅ All focused debugging tests passed!");
+
+        // Check if we should use Memory64 for large models
+        #[cfg(feature = "memory64")]
+        {
+            // Estimate total model size from tensor metadata
+            if let Some(meta) = parser.metadata() {
+                let total_size: usize = meta.tensors.iter().map(|t| t.size_bytes).sum();
+                let size_gb = total_size as f64 / 1_000_000_000.0;
+
+                println!("📊 Model size estimate: {:.2} GB ({} bytes)", size_gb, total_size);
+
+                // Use Memory64 for models >3GB
+                if total_size > 3_000_000_000 {
+                    println!(
+                        "🎯 Large model detected - using Memory64 for on-demand layer loading"
+                    );
+
+                    // Create Memory64 loader and load the model
+                    let mut mem64_loader = crate::memory64_gguf::Memory64GGUFLoader::new();
+                    let mem64_model = mem64_loader.load_model(parser)?;
+
+                    // Copy embeddings and norms from Memory64Model to self
+                    // (forward pass expects these in the Model struct)
+                    self.token_embeddings.copy_from_slice(&mem64_model.token_embeddings);
+                    self.output_norm.copy_from_slice(&mem64_model.output_norm);
+                    self.lm_head.copy_from_slice(&mem64_model.lm_head);
+
+                    println!(
+                        "✅ Embeddings and norms loaded ({:.2} MB)",
+                        (self.token_embeddings.len() * 4
+                            + self.output_norm.len() * 4
+                            + self.lm_head.len() * 4) as f64
+                            / 1_000_000.0
+                    );
+
+                    // Store Memory64Model for on-demand layer access
+                    self.memory64_model = Some(mem64_model);
+
+                    println!("✅ Memory64 model loaded - layers will be accessed on-demand");
+                    println!(
+                        "💾 Memory savings: ~{:.2} GB (layers not loaded into RAM)",
+                        (total_size
+                            - (self.token_embeddings.len() * 4
+                                + self.output_norm.len() * 4
+                                + self.lm_head.len() * 4)) as f64
+                            / 1_000_000_000.0
+                    );
+
+                    // Skip standard layer loading
+                    return Ok(());
+                }
+            }
+        }
+
+        // Standard loading path for smaller models
+        println!("📦 Using standard loading (all weights in RAM)");
 
         // Load token embeddings - try different tensor names
         let embedding_data = if let Ok(data) =
@@ -703,13 +764,49 @@ impl Model {
 
     /// Forward pass through a single layer
     ///
-    /// Helper method to avoid borrow checker issues
+    /// Supports both standard (Vec) and Memory64 (on-demand) layer access
     fn forward_layer(
         &mut self,
         layer_idx: usize,
         hidden_states: &[f32],
         position: usize,
     ) -> Result<Vec<f32>> {
+        // Check if we should use Memory64 path
+        #[cfg(feature = "memory64")]
+        let use_memory64 = self.memory64_model.is_some();
+        #[cfg(not(feature = "memory64"))]
+        let use_memory64 = false;
+
+        if use_memory64 {
+            #[cfg(feature = "memory64")]
+            {
+                // Memory64 path: Get layer from on-demand storage
+                let layer =
+                    self.memory64_model.as_mut().unwrap().get_layer(layer_idx as u32).map_err(
+                        |e| {
+                            wasm_chord_core::error::Error::Runtime(format!(
+                                "Memory64 layer {} access failed: {}",
+                                layer_idx, e
+                            ))
+                        },
+                    )?;
+
+                let kv_cache = &mut self.kv_caches[layer_idx];
+                #[cfg(feature = "webgpu")]
+                let gpu = self.gpu.as_ref();
+
+                return layer.forward(
+                    hidden_states,
+                    kv_cache,
+                    position,
+                    &self.candle_backend,
+                    #[cfg(feature = "webgpu")]
+                    gpu,
+                );
+            }
+        }
+
+        // Standard path: Direct Vec access
         let kv_cache = &mut self.kv_caches[layer_idx];
         #[cfg(feature = "webgpu")]
         let gpu = self.gpu.as_ref();
