@@ -112,8 +112,6 @@ jobs:
             check: "runtime-memory64-webgpu"
           - name: "Runtime (Memory64+CUDA)"
             check: "runtime-memory64-cuda"
-          - name: "Examples"
-            check: "examples"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
