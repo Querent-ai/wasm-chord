@@ -44,6 +44,7 @@ enum FlashBackend {
 
     /// CUDA implementation (requires NVIDIA GPU)
     #[cfg(feature = "cuda")]
+    #[allow(clippy::upper_case_acronyms)]
     CUDA,
 
     /// Metal implementation (requires Apple Silicon)
