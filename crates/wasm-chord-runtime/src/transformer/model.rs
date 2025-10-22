@@ -1353,14 +1353,8 @@ impl Model {
 
         let num_prompt_tokens = tokens.len();
 
-        if std::env::var("DEBUG").is_ok() {
-            eprintln!("DEBUG: Starting generation with {} prompt tokens", num_prompt_tokens);
-        }
-
         // PREFILL PHASE: Process prompt tokens in chunks to avoid memory issues
-
-        // Process prompt tokens in chunks to avoid memory issues
-        let chunk_size = 8; // Increased from 1 to 8 for better performance
+        let chunk_size = 8; // Process 8 tokens at a time for better performance
         let mut prefill_logits = Vec::new();
 
         for chunk_start in (0..num_prompt_tokens).step_by(chunk_size) {
@@ -1373,10 +1367,8 @@ impl Model {
         // Get logits for the last prompt token
         let logits = prefill_logits[(prefill_logits.len() - self.config.vocab_size)..].to_vec();
 
-        // Get logits for the last prompt token (this is what we use to generate the first new token)
-        let mut last_logits = logits.clone();
-
         // Sample first generated token
+        let mut last_logits = logits.clone();
         let next = logits_processor.sample(&mut last_logits).map_err(Error::ParseError)?;
         tokens.push(next);
 

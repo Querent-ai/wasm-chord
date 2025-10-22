@@ -1,5 +1,5 @@
 /// Test RMSNorm implementation
-use wasm_chord_runtime::{Model, TransformerConfig};
+use wasm_chord_runtime::{attention::AttentionBackend, Model, TransformerConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔍 Testing RMSNorm Implementation");
@@ -16,6 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         num_layers: 1,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let model = Model::new(config);

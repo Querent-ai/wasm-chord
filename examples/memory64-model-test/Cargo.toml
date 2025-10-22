@@ -6,3 +6,8 @@ edition = "2021"
 [dependencies]
 wasm-chord-core = { workspace = true }
 wasm-chord-runtime = { workspace = true, features = ["memory64"] }
+
+[features]
+async-prefetch = ["wasm-chord-runtime/async-prefetch"]
+cuda = ["wasm-chord-runtime/cuda"]
+metal = ["wasm-chord-runtime/metal"]

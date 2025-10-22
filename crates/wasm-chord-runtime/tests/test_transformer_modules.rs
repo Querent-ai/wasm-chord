@@ -1,8 +1,8 @@
 //! Comprehensive tests for the refactored transformer modules
 
 use wasm_chord_runtime::{
-    AttentionWeights, FFNWeights, FeedForward, GenerationConfig, KVCache, Model,
-    MultiHeadAttention, TransformerConfig, TransformerLayer,
+    attention::AttentionBackend, AttentionWeights, FFNWeights, FeedForward, GenerationConfig,
+    KVCache, Model, MultiHeadAttention, TransformerConfig, TransformerLayer,
 };
 
 /// Test TransformerConfig creation and defaults
@@ -115,6 +115,7 @@ fn test_attention_weights_creation() {
         max_seq_len: 128,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let weights = AttentionWeights::new(&config);
@@ -145,6 +146,7 @@ fn test_ffn_weights_creation() {
         max_seq_len: 128,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let weights = FFNWeights::new(&config);
@@ -168,6 +170,7 @@ fn test_multi_head_attention_creation() {
         max_seq_len: 128,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let attn = MultiHeadAttention::new(config.clone());
@@ -189,6 +192,7 @@ fn test_feed_forward_creation() {
         max_seq_len: 128,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let _ffn = FeedForward::new(config);
@@ -208,6 +212,7 @@ fn test_transformer_layer_creation() {
         max_seq_len: 128,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let layer = TransformerLayer::new(&config);
@@ -229,6 +234,7 @@ fn test_model_creation() {
         max_seq_len: 128,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let model = Model::new(config.clone());
@@ -252,6 +258,7 @@ fn test_model_rms_norm() {
         max_seq_len: 128,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let model = Model::new(config);
@@ -291,6 +298,7 @@ fn test_model_clear_kv_cache() {
         max_seq_len: 128,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let mut model = Model::new(config);
@@ -317,6 +325,7 @@ fn test_config_clone() {
         max_seq_len: 128,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let cloned = config.clone();
@@ -390,6 +399,7 @@ fn test_model_layers_initialization() {
         max_seq_len: 128,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let model = Model::new(config.clone());

@@ -33,6 +33,9 @@ pub mod memory64_gguf;
 #[cfg(feature = "async-prefetch")]
 pub mod async_prefetch;
 
+// Attention implementations (Standard and Flash Attention)
+pub mod attention;
+
 mod multi_memory;
 mod sampling;
 mod sharding;

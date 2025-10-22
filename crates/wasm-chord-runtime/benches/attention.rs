@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use wasm_chord_runtime::{MultiHeadAttention, TransformerConfig};
+use wasm_chord_runtime::{attention::AttentionBackend, MultiHeadAttention, TransformerConfig};
 
 fn bench_attention_computation(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("attention_computation");
@@ -15,6 +15,7 @@ fn bench_attention_computation(criterion: &mut Criterion) {
         max_seq_len: 2048,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let head_dim = config.hidden_size / config.num_heads;
@@ -57,6 +58,7 @@ fn bench_attention_gqa_ratios(criterion: &mut Criterion) {
             max_seq_len: 2048,
             rms_norm_eps: 1e-5,
             rope_theta: 10000.0,
+            attention_backend: AttentionBackend::Auto,
         };
 
         let attn = MultiHeadAttention::new(config.clone());

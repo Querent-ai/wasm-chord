@@ -7,19 +7,23 @@ use wasm_chord_cpu::{matmul_f32, matmul_transposed};
 use wasm_chord_gpu::GpuBackend;
 
 use super::{KVCache, TransformerConfig};
+use crate::attention::{create_attention, Attention};
 
 /// Multi-head attention layer
 #[allow(dead_code)]
 pub struct MultiHeadAttention {
     pub config: TransformerConfig,
     head_dim: usize,
+    attention_impl: Box<dyn Attention>,
 }
 
 #[allow(dead_code)]
 impl MultiHeadAttention {
     pub fn new(config: TransformerConfig) -> Self {
         let head_dim = config.hidden_size / config.num_heads;
-        Self { config, head_dim }
+        let attention_impl = create_attention(config.attention_backend);
+
+        Self { config, head_dim, attention_impl }
     }
 
     /// Helper: matrix multiplication with GPU/CPU fallback
@@ -321,14 +325,17 @@ impl MultiHeadAttention {
         output
     }
 
-    /// Compute scaled dot-product attention (Candle-style with batched operations)
+    /// Compute scaled dot-product attention using the configured attention backend
     ///
-    /// Follows Candle's approach:
+    /// Supports multiple attention implementations:
+    /// - Standard: Traditional O(N²) attention
+    /// - Flash: IO-aware Flash Attention (3-4x faster, O(N) memory)
+    ///
+    /// Process:
     /// 1. Repeat K/V for GQA (if num_heads != num_kv_heads)
-    /// 2. Compute attention scores: Q @ K^T / sqrt(head_dim)
-    /// 3. Apply causal mask
-    /// 4. Softmax over scores
-    /// 5. Apply attention: scores @ V
+    /// 2. Build causal mask
+    /// 3. Call attention implementation (Standard or Flash)
+    /// 4. Return output
     pub fn compute_attention(
         &self,
         q: &[f32],
@@ -363,75 +370,89 @@ impl MultiHeadAttention {
             eprintln!("  K/V repeated to shape: [{}x{}x{}]", kv_seq_len, num_heads, head_dim);
         }
 
-        // Compute attention for each head independently
-        let mut output = vec![0.0; seq_len * num_heads * head_dim];
-        let scale = 1.0 / (head_dim as f32).sqrt();
-
-        for h in 0..num_heads {
-            for i in 0..seq_len {
-                // Get query vector: Q[i, h, :]
-                let q_offset = (i * num_heads + h) * head_dim;
-                let q_vec = &q[q_offset..q_offset + head_dim];
-
-                // Compute scores = Q[i,h] @ K[j,h]^T for all j
-                let mut scores = vec![0.0; kv_seq_len];
-                for (j, score_ref) in scores.iter_mut().enumerate().take(kv_seq_len) {
-                    let k_offset = (j * num_heads + h) * head_dim;
-                    let k_vec = &k_repeated[k_offset..k_offset + head_dim];
-
-                    // Dot product: Q @ K^T
-                    let mut score = 0.0;
-                    for d in 0..head_dim {
-                        score += q_vec[d] * k_vec[d];
-                    }
-                    *score_ref = score * scale;
-
-                    // Causal masking
-                    let query_abs_pos = position + i;
-                    if j > query_abs_pos {
-                        *score_ref = f32::NEG_INFINITY;
-                    }
-                }
-
-                // Softmax
-                let max_score = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                let mut exp_sum = 0.0;
-                for score in &mut scores {
-                    if score.is_finite() {
-                        *score = (*score - max_score).exp();
-                        exp_sum += *score;
-                    } else {
-                        *score = 0.0;
-                    }
-                }
-                if exp_sum > 0.0 {
-                    for score in &mut scores {
-                        *score /= exp_sum;
-                    }
-                }
-
-                // Debug attention weights
-                if std::env::var("DEBUG_ATTN_WEIGHTS").is_ok() && h == 0 && i == 0 {
-                    eprintln!(
-                        "  Attention weights (head 0, query 0): {:?}",
-                        &scores[..kv_seq_len.min(5)]
-                    );
-                }
-
-                // Weighted sum: output = scores @ V
-                let out_offset = (i * num_heads + h) * head_dim;
-                for (j, &weight) in scores.iter().enumerate().take(kv_seq_len) {
-                    let v_offset = (j * num_heads + h) * head_dim;
-                    let v_vec = &v_repeated[v_offset..v_offset + head_dim];
-
-                    for d in 0..head_dim {
-                        output[out_offset + d] += weight * v_vec[d];
-                    }
+        // Build causal mask: mask[i, j] = 0.0 if j > position + i (masked), 1.0 if allowed
+        // Attention implementations expect 0.0 = masked, non-zero = allowed
+        let mut mask = vec![1.0; seq_len * kv_seq_len];
+        for i in 0..seq_len {
+            let query_abs_pos = position + i;
+            for j in 0..kv_seq_len {
+                if j > query_abs_pos {
+                    mask[i * kv_seq_len + j] = 0.0; // Mask future tokens
                 }
             }
         }
 
+        // Call the attention implementation (Flash or Standard)
+        // Input layout: [seq_len, num_heads, head_dim]
+        // Attention trait expects: [batch=1, num_heads, seq_len, head_dim]
+        // We need to reshape: transpose from [seq_len, num_heads, head_dim] to [num_heads, seq_len, head_dim]
+
+        let q_transposed = self.transpose_for_attention(q, seq_len, num_heads, head_dim);
+        let k_transposed =
+            self.transpose_for_attention(&k_repeated, kv_seq_len, num_heads, head_dim);
+        let v_transposed =
+            self.transpose_for_attention(&v_repeated, kv_seq_len, num_heads, head_dim);
+
+        // Call attention (batch_size=1 for single sequence)
+        let output_transposed = self.attention_impl.forward(
+            &q_transposed,
+            &k_transposed,
+            &v_transposed,
+            Some(&mask),
+            1, // batch_size
+            num_heads,
+            seq_len,
+            kv_seq_len,
+            head_dim,
+        )?;
+
+        // Transpose back: [num_heads, seq_len, head_dim] -> [seq_len, num_heads, head_dim]
+        let output =
+            self.transpose_from_attention(&output_transposed, seq_len, num_heads, head_dim);
+
         Ok(output)
+    }
+
+    /// Transpose from [seq_len, num_heads, head_dim] to [num_heads, seq_len, head_dim]
+    fn transpose_for_attention(
+        &self,
+        tensor: &[f32],
+        seq_len: usize,
+        num_heads: usize,
+        head_dim: usize,
+    ) -> Vec<f32> {
+        let mut output = vec![0.0; seq_len * num_heads * head_dim];
+        for s in 0..seq_len {
+            for h in 0..num_heads {
+                for d in 0..head_dim {
+                    let src_idx = (s * num_heads + h) * head_dim + d;
+                    let dst_idx = (h * seq_len + s) * head_dim + d;
+                    output[dst_idx] = tensor[src_idx];
+                }
+            }
+        }
+        output
+    }
+
+    /// Transpose from [num_heads, seq_len, head_dim] to [seq_len, num_heads, head_dim]
+    fn transpose_from_attention(
+        &self,
+        tensor: &[f32],
+        seq_len: usize,
+        num_heads: usize,
+        head_dim: usize,
+    ) -> Vec<f32> {
+        let mut output = vec![0.0; seq_len * num_heads * head_dim];
+        for h in 0..num_heads {
+            for s in 0..seq_len {
+                for d in 0..head_dim {
+                    let src_idx = (h * seq_len + s) * head_dim + d;
+                    let dst_idx = (s * num_heads + h) * head_dim + d;
+                    output[dst_idx] = tensor[src_idx];
+                }
+            }
+        }
+        output
     }
 }
 

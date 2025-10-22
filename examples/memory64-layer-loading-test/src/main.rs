@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 use wasm_chord_core::error::Result;
+use wasm_chord_runtime::attention::AttentionBackend;
 use wasm_chord_runtime::{
     memory64::{Memory64Runtime, MemoryLayout},
     memory64_layer_manager::{Memory64LayerManager, Memory64Model},
@@ -38,6 +39,7 @@ fn main() -> Result<()> {
         intermediate_size: 5632,
         max_seq_len: 2048,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
         rms_norm_eps: 1e-6,
     };
     println!(

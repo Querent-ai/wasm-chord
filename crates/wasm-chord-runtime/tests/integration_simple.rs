@@ -1,5 +1,5 @@
 /// Simple integration tests for model inference
-use wasm_chord_runtime::{Model, TransformerConfig};
+use wasm_chord_runtime::{attention::AttentionBackend, Model, TransformerConfig};
 
 #[test]
 fn test_model_creation() {
@@ -13,6 +13,7 @@ fn test_model_creation() {
         max_seq_len: 512,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let model = Model::new(config);
@@ -37,6 +38,7 @@ fn test_forward_pass() {
         max_seq_len: 512,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let mut model = Model::new(config);
@@ -63,6 +65,7 @@ fn test_sampling() {
         max_seq_len: 512,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
 
     let model = Model::new(config);

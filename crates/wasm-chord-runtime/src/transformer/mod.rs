@@ -79,6 +79,7 @@ mod tests {
             max_seq_len: 128,
             rms_norm_eps: 1e-5,
             rope_theta: 10000.0,
+            attention_backend: crate::attention::AttentionBackend::Auto,
         };
 
         let mut model = Model::new(config);
@@ -105,6 +106,7 @@ mod tests {
             max_seq_len: 32,
             rms_norm_eps: 1e-5,
             rope_theta: 10000.0,
+            attention_backend: crate::attention::AttentionBackend::Auto,
         };
 
         let model = Model::new(config);
@@ -134,6 +136,7 @@ mod tests {
             max_seq_len: 32,
             rms_norm_eps: 1e-5,
             rope_theta: 10000.0,
+            attention_backend: crate::attention::AttentionBackend::Auto,
         };
 
         let model = Model::new(config);
@@ -158,6 +161,7 @@ mod tests {
             max_seq_len: 32,
             rms_norm_eps: 1e-5,
             rope_theta: 10000.0,
+            attention_backend: crate::attention::AttentionBackend::Auto,
         };
 
         let model = Model::new(config);
@@ -187,6 +191,7 @@ mod tests {
             max_seq_len: 32,
             rms_norm_eps: 1e-5,
             rope_theta: 10000.0,
+            attention_backend: crate::attention::AttentionBackend::Auto,
         };
 
         let model = Model::new(config);
@@ -217,6 +222,7 @@ mod tests {
             max_seq_len: 128,
             rms_norm_eps: 1e-5,
             rope_theta: 10000.0,
+            attention_backend: crate::attention::AttentionBackend::Auto,
         };
 
         let attention = MultiHeadAttention::new(config.clone());
@@ -255,6 +261,7 @@ mod tests {
             max_seq_len: 128,
             rms_norm_eps: 1e-5,
             rope_theta: 10000.0,
+            attention_backend: crate::attention::AttentionBackend::Auto,
         };
 
         let attention = MultiHeadAttention::new(config.clone());
@@ -306,6 +313,7 @@ mod tests {
             max_seq_len: 128,
             rms_norm_eps: 1e-5,
             rope_theta: 10000.0,
+            attention_backend: crate::attention::AttentionBackend::Auto,
         };
 
         let attention = MultiHeadAttention::new(config.clone());

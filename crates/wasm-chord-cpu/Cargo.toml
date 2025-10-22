@@ -12,6 +12,7 @@ wasm-chord-core = { workspace = true }
 bytemuck = { workspace = true }
 rayon = { workspace = true }
 ndarray = { workspace = true }
+half = { workspace = true }
 
 # Candle for optimized CPU matmul and GPU support
 candle-core = { workspace = true }
@@ -32,4 +33,8 @@ criterion = { workspace = true }
 
 [[bench]]
 name = "gemm"
+harness = false
+
+[[bench]]
+name = "fused_kernels"
 harness = false
