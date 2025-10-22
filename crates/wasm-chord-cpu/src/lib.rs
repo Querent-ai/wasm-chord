@@ -14,7 +14,8 @@ pub use candle_tensor_backend::CandleTensorBackend;
 // Re-export CandleGpuBackend from wasm-chord-gpu for convenience
 // This allows code to use `wasm_chord_cpu::CandleGpuBackend` while the implementation lives in the GPU package
 pub use fused::{
-    fused_attention_score, fused_dequant_matmul_q4k, fused_rmsnorm_linear, fused_swiglu_proj,
+    fused_attention_score, fused_dequant_matmul_q4k, fused_dequant_matmul_q5k,
+    fused_dequant_matmul_q6k, fused_dequant_matmul_q8k, fused_rmsnorm_linear, fused_swiglu_proj,
 };
 pub use gemm::{matmul_f32, matmul_transposed};
 #[cfg(feature = "gpu")]

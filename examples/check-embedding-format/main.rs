@@ -75,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n📊 Compare token 0 vs token 1:");
     let token0_start = 0 * hidden_size;
     let token0_end = token0_start + hidden_size;
-    let token1_start = 1 * hidden_size;
+    let token1_start = hidden_size;
     let token1_end = token1_start + hidden_size;
 
     if token1_end <= model.token_embeddings.len() {

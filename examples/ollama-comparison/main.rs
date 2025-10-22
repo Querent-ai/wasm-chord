@@ -129,7 +129,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ Top 20 tokens:");
     for (rank, (token_id, logit)) in indexed_logits.iter().take(20).enumerate() {
         let token_text = tokenizer.id_to_token(*token_id as u32);
-        let token_str = token_text.as_deref().unwrap_or("<unknown>");
+        let token_str = token_text.unwrap_or("<unknown>");
         println!("   {}: {} (id: {}, logit: {:.6})", rank + 1, token_str, token_id, logit);
     }
 

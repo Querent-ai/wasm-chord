@@ -5,7 +5,6 @@
 
 use std::fs::File;
 use std::io::BufReader;
-use std::path::PathBuf;
 use wasm_chord_core::{GGUFParser, TensorLoader, Tokenizer};
 use wasm_chord_runtime::{GenerationConfig, Model, TransformerConfig};
 

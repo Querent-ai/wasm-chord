@@ -148,7 +148,7 @@ fn test_swiglu_known_values() {
     // Expected values (computed manually)
     let silu_1 = 1.0 * (1.0 / (1.0 + (-1.0f32).exp())); // ≈ 0.731059
     let silu_0 = 0.0;
-    let silu_neg1 = -1.0 * (1.0 / (1.0 + (-(-1.0f32)).exp())); // ≈ -0.268941
+    let silu_neg1 = -(1.0 / (1.0 + (-(-1.0f32)).exp())); // ≈ -0.268941
 
     let expected = vec![silu_1 * 2.0, silu_0 * 1.0, silu_neg1 * 3.0];
 

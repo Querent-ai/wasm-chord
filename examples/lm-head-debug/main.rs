@@ -136,13 +136,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   First hidden state (first 10): {:?}", &first_hidden[..10.min(hidden_size)]);
 
     // Compute logits manually for a few tokens
-    let test_tokens = vec![15043, 3869, 1939, 31982]; // Hello, Yes, No, 番
-    let token_names = vec!["Hello", "Yes", "No", "番"];
+    let test_tokens = [15043, 3869, 1939, 31982]; // Hello, Yes, No, 番
+    let token_names = ["Hello", "Yes", "No", "番"];
 
     for (token_id, token_name) in test_tokens.iter().zip(token_names.iter()) {
         let mut logit = 0.0f32;
         for i in 0..hidden_size {
-            let weight_idx = i * config.vocab_size + *token_id as usize;
+            let weight_idx = i * config.vocab_size + *token_id;
             if weight_idx < model.lm_head.len() {
                 logit += first_hidden[i] * model.lm_head[weight_idx];
             }
@@ -163,7 +163,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if *token_id < logits.len() {
             println!(
                 "   Model logit for '{}' (token {}): {:.6}",
-                token_name, token_id, logits[*token_id as usize]
+                token_name, token_id, logits[*token_id]
             );
         }
     }
