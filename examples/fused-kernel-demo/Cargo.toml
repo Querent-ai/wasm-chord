@@ -1,0 +1,13 @@
+[package]
+name = "fused-kernel-demo"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+wasm-chord-core = { path = "../../crates/wasm-chord-core" }
+wasm-chord-cpu = { path = "../../crates/wasm-chord-cpu" }
+anyhow = "1.0"
+half = "2.3"
+
