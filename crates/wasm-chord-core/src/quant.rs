@@ -127,7 +127,7 @@ pub struct BlockQ6_K {
 
 /// Q5_K block: 256 5-bit values in a super-block
 /// Structure based on ggml implementation
-/// Total: 176 bytes (128 ql + 32 qh + 16 scales + 2 d)
+/// Total: 178 bytes (128 ql + 32 qh + 16 scales + 2 d = 178 bytes due to alignment)
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct BlockQ5_K {
@@ -139,7 +139,7 @@ pub struct BlockQ5_K {
 
 /// Q8_K block: 256 8-bit values in a super-block
 /// Structure based on ggml implementation
-/// Total: 322 bytes (256 quants + 32 scales + 2 d + 2 dmin)
+/// Total: 292 bytes (256 quants + 32 scales + 2 d + 2 dmin = 292 bytes actual size)
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct BlockQ8_K {

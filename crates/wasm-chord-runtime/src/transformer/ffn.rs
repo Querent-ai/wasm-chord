@@ -70,11 +70,20 @@ impl FeedForward {
             seq_len,
             hidden_size,
             intermediate_size,
+            #[cfg(any(feature = "webgpu", feature = "cuda", feature = "metal"))]
+            _gpu.map(|g| g as &dyn std::any::Any),
         )?;
 
         // Up projection using fused kernels
-        let up =
-            dispatch_matmul(hidden_states, &weights.w_up, seq_len, hidden_size, intermediate_size)?;
+        let up = dispatch_matmul(
+            hidden_states,
+            &weights.w_up,
+            seq_len,
+            hidden_size,
+            intermediate_size,
+            #[cfg(any(feature = "webgpu", feature = "cuda", feature = "metal"))]
+            _gpu.map(|g| g as &dyn std::any::Any),
+        )?;
 
         // SwiGLU activation: silu(gate) * up
         // where silu(x) = x * sigmoid(x) = x / (1 + exp(-x))
@@ -85,8 +94,15 @@ impl FeedForward {
         }
 
         // Down projection using fused kernels
-        let output =
-            dispatch_matmul(&gate, &weights.w_down, seq_len, intermediate_size, hidden_size)?;
+        let output = dispatch_matmul(
+            &gate,
+            &weights.w_down,
+            seq_len,
+            intermediate_size,
+            hidden_size,
+            #[cfg(any(feature = "webgpu", feature = "cuda", feature = "metal"))]
+            _gpu.map(|g| g as &dyn std::any::Any),
+        )?;
 
         Ok(output)
     }

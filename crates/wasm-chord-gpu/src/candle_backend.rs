@@ -188,6 +188,70 @@ impl CandleGpuBackend {
             if tensor.dims().len() > 1 { tensor.flatten_all()? } else { tensor.clone() };
         flat_tensor.to_vec1::<f32>()
     }
+
+    /// Fused dequantization + matrix multiplication for Q4_K format
+    ///
+    /// This is a stub implementation that falls back to CPU.
+    /// TODO: Implement actual CUDA/Metal fused kernel for Q4_K
+    pub fn fused_dequant_matmul_q4k(
+        &self,
+        _blocks: &[wasm_chord_core::quant::BlockQ4_K],
+        _input: &[f32],
+        _batch_size: usize,
+        _n: usize,
+        _k: usize,
+    ) -> CandleResult<Vec<f32>> {
+        // TODO: Implement CUDA/Metal fused kernel
+        Err(candle_core::Error::Msg("CUDA/Metal fused Q4_K kernel not implemented yet".to_string()))
+    }
+
+    /// Fused dequantization + matrix multiplication for Q5_K format
+    ///
+    /// This is a stub implementation that falls back to CPU.
+    /// TODO: Implement actual CUDA/Metal fused kernel for Q5_K
+    pub fn fused_dequant_matmul_q5k(
+        &self,
+        _blocks: &[wasm_chord_core::quant::BlockQ5_K],
+        _input: &[f32],
+        _batch_size: usize,
+        _n: usize,
+        _k: usize,
+    ) -> CandleResult<Vec<f32>> {
+        // TODO: Implement CUDA/Metal fused kernel
+        Err(candle_core::Error::Msg("CUDA/Metal fused Q5_K kernel not implemented yet".to_string()))
+    }
+
+    /// Fused dequantization + matrix multiplication for Q6_K format
+    ///
+    /// This is a stub implementation that falls back to CPU.
+    /// TODO: Implement actual CUDA/Metal fused kernel for Q6_K
+    pub fn fused_dequant_matmul_q6k(
+        &self,
+        _blocks: &[wasm_chord_core::quant::BlockQ6_K],
+        _input: &[f32],
+        _batch_size: usize,
+        _n: usize,
+        _k: usize,
+    ) -> CandleResult<Vec<f32>> {
+        // TODO: Implement CUDA/Metal fused kernel
+        Err(candle_core::Error::Msg("CUDA/Metal fused Q6_K kernel not implemented yet".to_string()))
+    }
+
+    /// Fused dequantization + matrix multiplication for Q8_K format
+    ///
+    /// This is a stub implementation that falls back to CPU.
+    /// TODO: Implement actual CUDA/Metal fused kernel for Q8_K
+    pub fn fused_dequant_matmul_q8k(
+        &self,
+        _blocks: &[wasm_chord_core::quant::BlockQ8_K],
+        _input: &[f32],
+        _batch_size: usize,
+        _n: usize,
+        _k: usize,
+    ) -> CandleResult<Vec<f32>> {
+        // TODO: Implement CUDA/Metal fused kernel
+        Err(candle_core::Error::Msg("CUDA/Metal fused Q8_K kernel not implemented yet".to_string()))
+    }
 }
 
 impl Default for CandleGpuBackend {

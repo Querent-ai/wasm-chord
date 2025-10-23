@@ -83,7 +83,15 @@ impl MultiHeadAttention {
 
         // Project to Q, K, V using fused kernels
         // Q projection: [seq_len, hidden_size] x [hidden_size, hidden_size]
-        let q = dispatch_matmul(hidden_states, &weights.wq, seq_len, hidden_size, hidden_size)?;
+        let q = dispatch_matmul(
+            hidden_states,
+            &weights.wq,
+            seq_len,
+            hidden_size,
+            hidden_size,
+            #[cfg(any(feature = "webgpu", feature = "cuda", feature = "metal"))]
+            _gpu.map(|g| g as &dyn std::any::Any),
+        )?;
 
         // K projection: [seq_len, hidden_size] x [hidden_size, num_kv_heads * head_dim]
         let k = dispatch_matmul(
@@ -92,6 +100,8 @@ impl MultiHeadAttention {
             seq_len,
             hidden_size,
             self.config.num_kv_heads * self.head_dim,
+            #[cfg(any(feature = "webgpu", feature = "cuda", feature = "metal"))]
+            _gpu.map(|g| g as &dyn std::any::Any),
         )?;
 
         // V projection
@@ -101,6 +111,8 @@ impl MultiHeadAttention {
             seq_len,
             hidden_size,
             self.config.num_kv_heads * self.head_dim,
+            #[cfg(any(feature = "webgpu", feature = "cuda", feature = "metal"))]
+            _gpu.map(|g| g as &dyn std::any::Any),
         )?;
 
         // DEBUG: Dump Q, K, V for layer 0
@@ -154,7 +166,15 @@ impl MultiHeadAttention {
         }
 
         // Output projection
-        let result = dispatch_matmul(&output, &weights.wo, seq_len, hidden_size, hidden_size)?;
+        let result = dispatch_matmul(
+            &output,
+            &weights.wo,
+            seq_len,
+            hidden_size,
+            hidden_size,
+            #[cfg(any(feature = "webgpu", feature = "cuda", feature = "metal"))]
+            _gpu.map(|g| g as &dyn std::any::Any),
+        )?;
 
         Ok(result)
     }

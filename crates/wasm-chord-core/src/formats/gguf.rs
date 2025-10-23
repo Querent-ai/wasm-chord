@@ -158,7 +158,7 @@ impl<R: Read + Seek> GGUFParser<R> {
         Ok(meta)
     }
 
-    /// Get current position for tensor data (aligned to 32 bytes)
+    /// Get tensor data section offset (after parsing header)
     pub fn tensor_data_offset(&mut self) -> Result<u64> {
         const GGUF_DEFAULT_ALIGNMENT: u64 = 32;
 

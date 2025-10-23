@@ -27,6 +27,9 @@ pub enum Error {
     #[error("Runtime error: {0}")]
     Runtime(String),
 
+    #[error("Feature not implemented: {0}")]
+    NotImplemented(String),
+
     #[error("Unknown error: {0}")]
     Unknown(String),
 }

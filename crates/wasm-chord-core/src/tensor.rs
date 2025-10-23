@@ -161,15 +161,15 @@ impl TensorDesc {
                     (shape.numel() / block_size) * bytes_per_block
                 }
                 DataType::Q5_K => {
-                    // Q5_K: 256 elements per block, 176 bytes per block
+                    // Q5_K: 256 elements per block, 178 bytes per block (actual struct size)
                     let block_size = 256;
-                    let bytes_per_block = 176;
+                    let bytes_per_block = 178;
                     (shape.numel() / block_size) * bytes_per_block
                 }
                 DataType::Q8_K => {
-                    // Q8_K: 256 elements per block, 322 bytes per block
+                    // Q8_K: 256 elements per block, 292 bytes per block (actual struct size)
                     let block_size = 256;
-                    let bytes_per_block = 322;
+                    let bytes_per_block = 292;
                     (shape.numel() / block_size) * bytes_per_block
                 }
                 _ => {

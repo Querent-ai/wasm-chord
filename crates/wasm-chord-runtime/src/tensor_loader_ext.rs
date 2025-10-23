@@ -20,10 +20,11 @@ pub fn load_weight_optimal<R: Read + Seek>(
     tensor_name: &str,
     metadata: &TensorMetadata,
     parser: &mut GGUFParser<R>,
-    data_offset: u64,
+    _data_offset: u64,
 ) -> Result<WeightFormat> {
     // Calculate absolute offset
-    let absolute_offset = data_offset + metadata.offset;
+    // metadata.offset is absolute from file start, not relative to tensor data section
+    let absolute_offset = metadata.offset;
 
     // Read raw tensor data
     let raw_data = parser.read_tensor_data(absolute_offset, metadata.size_bytes)?;

@@ -36,6 +36,7 @@ pub mod async_prefetch;
 // Attention implementations (Standard and Flash Attention)
 pub mod attention;
 
+mod gpu_integration_test;
 mod matmul_dispatch;
 mod multi_memory;
 mod sampling;
@@ -104,6 +105,7 @@ impl From<Error> for ErrorCode {
             Error::Io(_) => ErrorCode::IoError,
             Error::Runtime(_) => ErrorCode::GenericFailure,
             Error::Unknown(_) => ErrorCode::GenericFailure,
+            Error::NotImplemented(_) => ErrorCode::BackendUnsupported,
         }
     }
 }
