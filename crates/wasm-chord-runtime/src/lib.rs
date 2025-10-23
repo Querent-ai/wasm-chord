@@ -36,11 +36,14 @@ pub mod async_prefetch;
 // Attention implementations (Standard and Flash Attention)
 pub mod attention;
 
+mod matmul_dispatch;
 mod multi_memory;
 mod sampling;
 mod sharding;
 pub mod streaming;
+mod tensor_loader_ext;
 mod transformer;
+mod weight_format;
 
 #[cfg(target_arch = "wasm32")]
 mod web;

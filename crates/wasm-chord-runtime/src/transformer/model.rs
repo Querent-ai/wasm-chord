@@ -14,6 +14,7 @@ use wasm_chord_gpu::CandleGpuBackend;
 use wasm_chord_gpu::GpuBackend;
 
 use super::{GenerationConfig, KVCache, TransformerConfig, TransformerLayer};
+use crate::tensor_loader_ext::load_weight_optimal;
 
 /// Complete transformer model with embeddings and output head
 pub struct Model {
@@ -646,50 +647,89 @@ impl Model {
                 format!("blk.{}.attn_output", layer_idx)
             };
 
-            if let Ok(wq) = tensor_loader.load_tensor(&wq_name, parser) {
-                // Use GGUF weights directly - no transpose needed
-                // matmul_transposed will handle the orientation efficiently
-                layer.attention_weights.wq.copy_from_slice(wq);
-                if layer_idx == 0 {
-                    // eprintln!("LOADED '{}' raw.len={}", wq_name, wq.len());
-                    // tensor_stats(&format!("{} (model)", wq_name), &layer.attention_weights.wq);
+            // Load wq using optimal format (quantized or F32)
+            if let Some(metadata) = tensor_loader.get_metadata(&wq_name) {
+                let data_offset = parser.tensor_data_offset().unwrap_or(0);
+                match load_weight_optimal(&wq_name, metadata, parser, data_offset) {
+                    Ok(weight) => {
+                        layer.attention_weights.wq = weight;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "WARN: Failed to load {} optimally: {}, trying legacy",
+                            wq_name, e
+                        );
+                        if let Ok(wq) = tensor_loader.load_tensor(&wq_name, parser) {
+                            layer.attention_weights.wq =
+                                crate::weight_format::WeightFormat::F32(wq.to_vec());
+                        }
+                    }
                 }
             } else if layer_idx == 0 {
-                eprintln!("WARN: Failed to load {}", wq_name);
+                eprintln!("WARN: Tensor metadata not found for {}", wq_name);
             }
-            if let Ok(wk) = tensor_loader.load_tensor(&wk_name, parser) {
-                // Use GGUF weights directly - no transpose needed
-                // matmul_transposed will handle the orientation efficiently
-                layer.attention_weights.wk.copy_from_slice(wk);
-                if layer_idx == 0 {
-                    // eprintln!("LOADED '{}' raw.len={}", wk_name, wk.len());
-                    // tensor_stats(&format!("{} (model)", wk_name), &layer.attention_weights.wk);
+            // Load wk using optimal format
+            if let Some(metadata) = tensor_loader.get_metadata(&wk_name) {
+                let data_offset = parser.tensor_data_offset().unwrap_or(0);
+                match load_weight_optimal(&wk_name, metadata, parser, data_offset) {
+                    Ok(weight) => {
+                        layer.attention_weights.wk = weight;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "WARN: Failed to load {} optimally: {}, trying legacy",
+                            wk_name, e
+                        );
+                        if let Ok(wk) = tensor_loader.load_tensor(&wk_name, parser) {
+                            layer.attention_weights.wk =
+                                crate::weight_format::WeightFormat::F32(wk.to_vec());
+                        }
+                    }
                 }
             } else if layer_idx == 0 {
-                eprintln!("WARN: Failed to load {}", wk_name);
+                eprintln!("WARN: Tensor metadata not found for {}", wk_name);
             }
-            if let Ok(wv) = tensor_loader.load_tensor(&wv_name, parser) {
-                // Use GGUF weights directly - no transpose needed
-                // matmul_transposed will handle the orientation efficiently
-                layer.attention_weights.wv.copy_from_slice(wv);
-                if layer_idx == 0 {
-                    // eprintln!("LOADED '{}' raw.len={}", wv_name, wv.len());
-                    // tensor_stats(&format!("{} (model)", wv_name), &layer.attention_weights.wv);
+            // Load wv using optimal format
+            if let Some(metadata) = tensor_loader.get_metadata(&wv_name) {
+                let data_offset = parser.tensor_data_offset().unwrap_or(0);
+                match load_weight_optimal(&wv_name, metadata, parser, data_offset) {
+                    Ok(weight) => {
+                        layer.attention_weights.wv = weight;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "WARN: Failed to load {} optimally: {}, trying legacy",
+                            wv_name, e
+                        );
+                        if let Ok(wv) = tensor_loader.load_tensor(&wv_name, parser) {
+                            layer.attention_weights.wv =
+                                crate::weight_format::WeightFormat::F32(wv.to_vec());
+                        }
+                    }
                 }
             } else if layer_idx == 0 {
-                eprintln!("WARN: Failed to load {}", wv_name);
+                eprintln!("WARN: Tensor metadata not found for {}", wv_name);
             }
-            if let Ok(wo) = tensor_loader.load_tensor(&wo_name, parser) {
-                if layer_idx == 0 {
-                    // eprintln!("LOADED '{}' raw.len={}", wo_name, wo.len());
-                    // tensor_stats(&format!("{} (raw)", wo_name), wo);
-                }
-                layer.attention_weights.wo.copy_from_slice(wo);
-                if layer_idx == 0 {
-                    // tensor_stats(&format!("{} (model)", wo_name), &layer.attention_weights.wo);
+            // Load wo using optimal format
+            if let Some(metadata) = tensor_loader.get_metadata(&wo_name) {
+                let data_offset = parser.tensor_data_offset().unwrap_or(0);
+                match load_weight_optimal(&wo_name, metadata, parser, data_offset) {
+                    Ok(weight) => {
+                        layer.attention_weights.wo = weight;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "WARN: Failed to load {} optimally: {}, trying legacy",
+                            wo_name, e
+                        );
+                        if let Ok(wo) = tensor_loader.load_tensor(&wo_name, parser) {
+                            layer.attention_weights.wo =
+                                crate::weight_format::WeightFormat::F32(wo.to_vec());
+                        }
+                    }
                 }
             } else if layer_idx == 0 {
-                eprintln!("WARN: Failed to load {}", wo_name);
+                eprintln!("WARN: Tensor metadata not found for {}", wo_name);
             }
 
             // Debug attention weight orientation for first layer after all weights are loaded
@@ -737,19 +777,69 @@ impl Model {
                 layer.attention_norm.copy_from_slice(norm);
             }
 
-            // FFN weights
+            // FFN weights using optimal format
             let ffn_gate_name = format!("blk.{}.ffn_gate.weight", layer_idx);
             let ffn_up_name = format!("blk.{}.ffn_up.weight", layer_idx);
             let ffn_down_name = format!("blk.{}.ffn_down.weight", layer_idx);
 
-            if let Ok(gate) = tensor_loader.load_tensor(&ffn_gate_name, parser) {
-                layer.ffn_weights.w_gate.copy_from_slice(gate);
+            // Load ffn_gate using optimal format
+            if let Some(metadata) = tensor_loader.get_metadata(&ffn_gate_name) {
+                let data_offset = parser.tensor_data_offset().unwrap_or(0);
+                match load_weight_optimal(&ffn_gate_name, metadata, parser, data_offset) {
+                    Ok(weight) => {
+                        layer.ffn_weights.w_gate = weight;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "WARN: Failed to load {} optimally: {}, trying legacy",
+                            ffn_gate_name, e
+                        );
+                        if let Ok(gate) = tensor_loader.load_tensor(&ffn_gate_name, parser) {
+                            layer.ffn_weights.w_gate =
+                                crate::weight_format::WeightFormat::F32(gate.to_vec());
+                        }
+                    }
+                }
             }
-            if let Ok(up) = tensor_loader.load_tensor(&ffn_up_name, parser) {
-                layer.ffn_weights.w_up.copy_from_slice(up);
+
+            // Load ffn_up using optimal format
+            if let Some(metadata) = tensor_loader.get_metadata(&ffn_up_name) {
+                let data_offset = parser.tensor_data_offset().unwrap_or(0);
+                match load_weight_optimal(&ffn_up_name, metadata, parser, data_offset) {
+                    Ok(weight) => {
+                        layer.ffn_weights.w_up = weight;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "WARN: Failed to load {} optimally: {}, trying legacy",
+                            ffn_up_name, e
+                        );
+                        if let Ok(up) = tensor_loader.load_tensor(&ffn_up_name, parser) {
+                            layer.ffn_weights.w_up =
+                                crate::weight_format::WeightFormat::F32(up.to_vec());
+                        }
+                    }
+                }
             }
-            if let Ok(down) = tensor_loader.load_tensor(&ffn_down_name, parser) {
-                layer.ffn_weights.w_down.copy_from_slice(down);
+
+            // Load ffn_down using optimal format
+            if let Some(metadata) = tensor_loader.get_metadata(&ffn_down_name) {
+                let data_offset = parser.tensor_data_offset().unwrap_or(0);
+                match load_weight_optimal(&ffn_down_name, metadata, parser, data_offset) {
+                    Ok(weight) => {
+                        layer.ffn_weights.w_down = weight;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "WARN: Failed to load {} optimally: {}, trying legacy",
+                            ffn_down_name, e
+                        );
+                        if let Ok(down) = tensor_loader.load_tensor(&ffn_down_name, parser) {
+                            layer.ffn_weights.w_down =
+                                crate::weight_format::WeightFormat::F32(down.to_vec());
+                        }
+                    }
+                }
             }
 
             // FFN norm
