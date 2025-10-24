@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config_data = parser.extract_config().ok_or("Failed to extract config")?;
     let config: TransformerConfig = config_data.into();
-    let tokenizer = Tokenizer::from_gguf(&meta)?;
+    let _tokenizer = Tokenizer::from_gguf(&meta)?;
 
     println!(
         "✅ Config loaded: {} layers, {} vocab, {} hidden_size",

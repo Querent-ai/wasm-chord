@@ -15,6 +15,7 @@ pub struct FlashAttentionConfig {
     pub num_splits: usize,
 
     /// Use FP16 (half precision) for computation
+    #[allow(dead_code)]
     pub use_fp16: bool,
 
     /// Softmax scale factor (typically 1/sqrt(head_dim))
@@ -35,6 +36,7 @@ impl Default for FlashAttentionConfig {
 
 impl FlashAttentionConfig {
     /// Create config optimized for a specific GPU
+    #[allow(dead_code)]
     pub fn for_gpu(gpu_name: &str) -> Self {
         match gpu_name {
             // NVIDIA GPUs
@@ -68,6 +70,7 @@ impl FlashAttentionConfig {
     }
 
     /// Create config optimized for CPU
+    #[allow(dead_code)]
     pub fn for_cpu() -> Self {
         Self {
             block_size_q: 64, // Smaller blocks for CPU cache
@@ -79,6 +82,7 @@ impl FlashAttentionConfig {
     }
 
     /// Calculate SRAM usage for this configuration
+    #[allow(dead_code)]
     pub fn sram_usage_bytes(&self, head_dim: usize) -> usize {
         let element_size = if self.use_fp16 { 2 } else { 4 };
 

@@ -9,6 +9,7 @@ mod tests {
     use wasm_chord_core::quant::BlockQ4_K;
 
     #[cfg(any(feature = "webgpu", feature = "cuda", feature = "metal"))]
+    #[allow(unused_imports)]
     use wasm_chord_gpu::{CandleGpuBackend, GpuBackend};
 
     #[test]

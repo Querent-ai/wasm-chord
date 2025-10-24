@@ -28,6 +28,7 @@ impl StandardAttention {
     }
 
     /// Create with custom configuration
+    #[allow(dead_code)]
     pub fn with_config(config: StandardAttentionConfig) -> Self {
         Self { config }
     }

@@ -283,6 +283,7 @@ impl AsyncMemory64Model {
 
 // Fallback implementations for when async-prefetch feature is disabled
 #[cfg(not(feature = "async-prefetch"))]
+#[allow(dead_code)]
 pub struct AsyncPrefetchConfig {
     pub prefetch_distance: u32,
 }
@@ -295,15 +296,22 @@ impl Default for AsyncPrefetchConfig {
 }
 
 #[cfg(not(feature = "async-prefetch"))]
+#[allow(dead_code)]
 pub struct AsyncPrefetchManager;
 
 #[cfg(not(feature = "async-prefetch"))]
 impl AsyncPrefetchManager {
+    #[allow(dead_code)]
     pub fn new(_config: AsyncPrefetchConfig) -> Self {
         Self
     }
 
-    pub async fn trigger_prefetch(&self, _current_layer: u32, _num_layers: u32) -> Result<()> {
+    #[allow(dead_code)]
+    pub async fn trigger_prefetch(
+        &self,
+        _current_layer: u32,
+        _num_layers: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 }

@@ -22,7 +22,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 wasm-chord-core = { workspace = true }
 wasm-chord-cpu = { workspace = true }
-rayon = { version = "1.10", optional = true }
+num_cpus = { version = "1.16", optional = true }
 wasm-chord-gpu = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }

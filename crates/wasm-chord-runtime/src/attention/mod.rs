@@ -40,12 +40,15 @@ pub trait Attention: Send + Sync {
     ) -> Result<Vec<f32>>;
 
     /// Get the name of this attention implementation
+    #[allow(dead_code)]
     fn name(&self) -> &str;
 
     /// Check if this implementation is available on the current hardware
+    #[allow(dead_code)]
     fn is_available(&self) -> bool;
 
     /// Get estimated memory usage in bytes
+    #[allow(dead_code)]
     fn estimated_memory(&self, seq_len: usize, head_dim: usize, num_heads: usize) -> usize;
 }
 

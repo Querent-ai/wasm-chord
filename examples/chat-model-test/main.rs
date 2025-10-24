@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ Weights loaded\n");
 
     // === Test Multiple Prompts ===
-    let test_prompts = [
+    let _test_prompts = [
         "Hello, how are you?",
         "What is the capital of France?",
         "Explain quantum computing in simple terms",
