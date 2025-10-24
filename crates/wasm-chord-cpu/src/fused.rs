@@ -2431,6 +2431,7 @@ pub fn fused_dequant_matmul_q4k_pooled(
                             m1,
                             d2,
                             m2,
+                            32,
                         );
                     }
                 }

@@ -46,18 +46,6 @@ pub mod memory64_layer_manager;
 #[cfg(feature = "memory64")]
 pub mod memory64_gguf;
 
-// Async background prefetch optimization (already declared above)
-// #[cfg(feature = "async-prefetch")]
-// pub mod async_prefetch;
-
-// Attention implementations (already declared above)
-// pub pub mod attention;
-
-// These are already declared above - removed duplicates
-
-#[cfg(target_arch = "wasm32")]
-mod web;
-
 pub use abi::*;
 pub use chat::{ChatMessage, ChatRole, ChatTemplate};
 pub use context::RuntimeContext;
