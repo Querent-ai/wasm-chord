@@ -41,6 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_seq_len: 2048,
         rms_norm_eps: 1e-5,
         rope_theta: 10000.0,
+        attention_backend: wasm_chord_runtime::attention::AttentionBackend::Auto,
     };
 
     println!("Model config: {} layers, {} hidden size", config.num_layers, config.hidden_size);

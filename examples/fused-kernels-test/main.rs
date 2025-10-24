@@ -2,6 +2,7 @@
 ///
 /// Tests the fused kernel operations with deterministic inputs
 /// to ensure consistent numerical outputs across runs.
+use wasm_chord_core::quant::{BlockQ4_K, QK_K};
 use wasm_chord_cpu::{
     fused_attention_score, fused_dequant_matmul_q4k, fused_rmsnorm_linear, fused_swiglu_proj,
 };
@@ -171,18 +172,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Test 5: Fused Dequant + Matmul (Q4_K)
     println!("📝 Test 5: Fused Dequant + Matmul (Q4_K)");
 
-    let m = 2; // output rows
-    let n = 1; // output cols
+    let batch_size = 2; // output rows
+    let num_output_features = 1; // output cols
     let k = 256; // must be multiple of block size (256)
 
-    let quantized = vec![0u8; (k / 2 + 12) * n];
-    let scales = vec![1.0f32; n];
-    let input = vec![1.0f32; m * k];
-    let mut output = vec![0.0f32; m * n];
+    // Create Q4_K blocks (need num_output_features * k / QK_K blocks)
+    let num_blocks = (num_output_features * k) / QK_K;
+    let blocks: Vec<BlockQ4_K> = (0..num_blocks)
+        .map(|_| BlockQ4_K {
+            d: half::f16::from_f32(1.0).to_bits(),
+            dmin: half::f16::from_f32(0.0).to_bits(),
+            scales: [128u8; 12],
+            qs: [0u8; QK_K / 2],
+        })
+        .collect();
 
-    fused_dequant_matmul_q4k(&quantized, &scales, &input, &mut output, m, n, k)?;
+    let input = vec![1.0f32; batch_size * k];
+    let mut output = vec![0.0f32; batch_size * num_output_features];
 
-    println!("   Matrix dimensions: {}x{} × {}x{} = {}x{}", m, k, k, n, m, n);
+    fused_dequant_matmul_q4k(&blocks, &input, &mut output, batch_size, num_output_features, k)?;
+
+    println!(
+        "   Matrix dimensions: {}x{} × {}x{} = {}x{}",
+        batch_size, k, k, num_output_features, batch_size, num_output_features
+    );
     println!("   Output: {:?}", output);
 
     // Verify output is finite
@@ -191,10 +204,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Determinism check
-    let mut output2 = vec![0.0f32; m * n];
-    fused_dequant_matmul_q4k(&quantized, &scales, &input, &mut output2, m, n, k)?;
+    let mut output2 = vec![0.0f32; batch_size * num_output_features];
+    fused_dequant_matmul_q4k(&blocks, &input, &mut output2, batch_size, num_output_features, k)?;
 
-    for i in 0..(m * n) {
+    for i in 0..(batch_size * num_output_features) {
         assert_eq!(output[i], output2[i], "Dequant+Matmul must be deterministic");
     }
 

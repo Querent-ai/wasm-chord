@@ -1,0 +1,12 @@
+[package]
+name = "cpu-optimization-benchmark"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "cpu-optimization-benchmark"
+path = "src/main.rs"
+
+[dependencies]
+wasm-chord-cpu = { workspace = true }
+wasm-chord-core = { workspace = true }

@@ -1,7 +1,7 @@
 /// Kernel Verification: Compare with llama.cpp outputs
 /// This creates a minimal test that can be compared with llama.cpp's first token generation
 use wasm_chord_cpu::kernels::softmax;
-use wasm_chord_runtime::{Model, TransformerConfig};
+use wasm_chord_runtime::{attention::AttentionBackend, Model, TransformerConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔍 Kernel Verification vs llama.cpp");
@@ -111,6 +111,7 @@ fn test_rmsnorm_known_values() {
         num_layers: 1,
         rms_norm_eps: eps,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
     };
     let model = Model::new(config.clone());
     let our_rmsnorm = model.rms_norm(&input, &weight).unwrap();
@@ -147,7 +148,7 @@ fn test_swiglu_known_values() {
     // Expected values (computed manually)
     let silu_1 = 1.0 * (1.0 / (1.0 + (-1.0f32).exp())); // ≈ 0.731059
     let silu_0 = 0.0;
-    let silu_neg1 = -1.0 * (1.0 / (1.0 + (-(-1.0f32)).exp())); // ≈ -0.268941
+    let silu_neg1 = -(1.0 / (1.0 + (-(-1.0f32)).exp())); // ≈ -0.268941
 
     let expected = vec![silu_1 * 2.0, silu_0 * 1.0, silu_neg1 * 3.0];
 

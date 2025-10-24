@@ -1,5 +1,7 @@
 //! Transformer configuration structs
 
+use crate::attention::AttentionBackend;
+
 /// Transformer configuration
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -22,6 +24,8 @@ pub struct TransformerConfig {
     pub rms_norm_eps: f32,
     /// RoPE theta
     pub rope_theta: f32,
+    /// Attention implementation (Standard, Flash, Auto)
+    pub attention_backend: AttentionBackend,
 }
 
 impl Default for TransformerConfig {
@@ -36,6 +40,7 @@ impl Default for TransformerConfig {
             max_seq_len: 2048,
             rms_norm_eps: 1e-5,
             rope_theta: 10000.0,
+            attention_backend: AttentionBackend::Auto, // Auto-select best attention
         }
     }
 }
@@ -52,6 +57,7 @@ impl From<wasm_chord_core::TransformerConfigData> for TransformerConfig {
             max_seq_len: data.max_seq_len,
             rms_norm_eps: data.rms_norm_eps,
             rope_theta: data.rope_theta,
+            attention_backend: AttentionBackend::Auto, // Auto-select best attention
         }
     }
 }

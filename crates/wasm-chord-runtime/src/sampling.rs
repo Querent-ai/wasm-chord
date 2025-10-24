@@ -138,8 +138,9 @@ impl LogitsProcessor {
     fn sample_topp(&mut self, probs: &mut [f32], top_p: f32) -> Result<u32, String> {
         let mut indices: Vec<usize> = (0..probs.len()).collect();
 
-        // Sort by descending probability
-        indices.sort_by(|&i, &j| probs[j].partial_cmp(&probs[i]).unwrap());
+        // Sort by descending probability (handle NaN values gracefully)
+        indices
+            .sort_by(|&i, &j| probs[j].partial_cmp(&probs[i]).unwrap_or(std::cmp::Ordering::Equal));
 
         // Clamp smaller probabilities to zero
         let mut cumsum = 0.0;
@@ -204,8 +205,10 @@ impl LogitsProcessor {
 
         let mut indices: Vec<usize> = (0..probs.len()).collect();
 
-        // First apply top-k
-        indices.select_nth_unstable_by(top_k, |&i, &j| probs[j].partial_cmp(&probs[i]).unwrap());
+        // First apply top-k (handle NaN values gracefully)
+        indices.select_nth_unstable_by(top_k, |&i, &j| {
+            probs[j].partial_cmp(&probs[i]).unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Zero out probabilities outside top-k
         for &i in &indices[top_k..] {

@@ -177,6 +177,72 @@ impl GpuBackend {
         Ok(result)
     }
 
+    /// Fused dequantization + matrix multiplication for Q4_K format
+    ///
+    /// This is a stub implementation that falls back to CPU.
+    /// TODO: Implement actual WebGPU fused kernel for Q4_K
+    pub fn fused_dequant_matmul_q4k(
+        &self,
+        _blocks: &[wasm_chord_core::quant::BlockQ4_K],
+        _input: &[f32],
+        _batch_size: usize,
+        _n: usize,
+        _k: usize,
+    ) -> Result<Vec<f32>> {
+        // TODO: Implement WebGPU fused kernel
+        Err(Error::NotImplemented("WebGPU fused Q4_K kernel not implemented yet".to_string()))
+    }
+
+    /// Fused dequantization + matrix multiplication for Q5_K format
+    ///
+    /// This is a stub implementation that falls back to CPU.
+    /// TODO: Implement actual WebGPU fused kernel for Q5_K
+    pub fn fused_dequant_matmul_q5k(
+        &self,
+        _blocks: &[wasm_chord_core::quant::BlockQ5_K],
+        _input: &[f32],
+        _batch_size: usize,
+        _n: usize,
+        _k: usize,
+    ) -> Result<Vec<f32>> {
+        // TODO: Implement WebGPU fused kernel
+        Err(Error::NotImplemented("WebGPU fused Q5_K kernel not implemented yet".to_string()))
+    }
+
+    /// Fused dequantization + matrix multiplication for Q6_K format
+    ///
+    /// This is a stub implementation that falls back to CPU.
+    /// TODO: Implement actual WebGPU fused kernel for Q6_K
+    pub fn fused_dequant_matmul_q6k(
+        &self,
+        _blocks: &[wasm_chord_core::quant::BlockQ6_K],
+        _input: &[f32],
+        _batch_size: usize,
+        _n: usize,
+        _k: usize,
+    ) -> Result<Vec<f32>> {
+        // TODO: Implement WebGPU fused kernel
+        Err(Error::NotImplemented("WebGPU fused Q6_K kernel not implemented yet".to_string()))
+    }
+
+    /// Fused dequantization + matrix multiplication for Q8_K format
+    ///
+    /// This is a stub implementation that falls back to CPU.
+    /// TODO: Implement actual WebGPU fused kernel for Q8_K
+    pub fn fused_dequant_matmul_q8k(
+        &self,
+        _blocks: &[wasm_chord_core::quant::BlockQ8_K],
+        _input: &[f32],
+        _batch_size: usize,
+        _n: usize,
+        _k: usize,
+    ) -> Result<Vec<f32>> {
+        // TODO: Implement WebGPU fused kernel
+        Err(Error::NotImplemented("WebGPU fused Q8_K kernel not implemented yet".to_string()))
+    }
+}
+
+impl GpuBackend {
     /// Check if GPU is available
     pub fn is_available() -> bool {
         #[cfg(target_arch = "wasm32")]

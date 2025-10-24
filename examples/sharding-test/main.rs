@@ -82,7 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Verify no gaps or overlaps
-    let mut covered = vec![false; 35];
+    let mut covered = [false; 35];
     for shard in shards {
         for layer in shard.start_layer..shard.end_layer {
             assert!(!covered[layer], "Layer {} covered by multiple shards", layer);

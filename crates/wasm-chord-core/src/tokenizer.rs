@@ -229,80 +229,57 @@ impl Tokenizer {
         Ok(tokens)
     }
 
-    /// BPE encoding implementation
+    /// BPE encoding implementation (greedy longest-match)
+    ///
+    /// Uses a greedy approach: find the longest token in vocab that matches
+    /// the current position, consume it, repeat. This is O(N*V) instead of O(N²*M).
     fn encode_bpe(&self, text: &str) -> Result<Vec<u32>> {
         if text.is_empty() {
             return Ok(Vec::new());
         }
 
-        // DEBUG: Show what we're encoding
-        eprintln!("🔍 BPE encoding: {:?}", text);
-
-        // Start by converting text to individual Unicode characters
-        let mut tokens: Vec<String> = text.chars().map(|c| c.to_string()).collect();
-
-        // If we have no merges, try direct vocab lookup or use byte fallback
-        if self.merges.is_empty() {
-            eprintln!("⚠️  No merges found, using fallback encoding");
+        // If we have no merges or vocab is small, use fallback
+        if self.merges.is_empty() || self.vocab.is_empty() {
             return self.fallback_encode(text);
         }
 
-        eprintln!("✅ Using BPE with {} merges", self.merges.len());
-
-        // Build merge priority map (earlier merges have higher priority)
-        let mut merge_ranks: HashMap<(String, String), usize> = HashMap::new();
-        for (rank, (a, b)) in self.merges.iter().enumerate() {
-            merge_ranks.insert((a.clone(), b.clone()), rank);
-        }
-
-        // Apply BPE merges iteratively
-        loop {
-            if tokens.len() <= 1 {
-                break;
-            }
-
-            // Find the best merge (lowest rank = highest priority)
-            let mut best_pair: Option<(usize, usize)> = None;
-            let mut best_rank = usize::MAX;
-
-            for i in 0..tokens.len() - 1 {
-                let pair = (tokens[i].clone(), tokens[i + 1].clone());
-                if let Some(&rank) = merge_ranks.get(&pair) {
-                    if rank < best_rank {
-                        best_rank = rank;
-                        best_pair = Some((i, rank));
-                    }
-                }
-            }
-
-            // If no merge found, we're done
-            if best_pair.is_none() {
-                break;
-            }
-
-            let (merge_idx, _) = best_pair.unwrap();
-
-            // Perform the merge
-            let merged = format!("{}{}", tokens[merge_idx], tokens[merge_idx + 1]);
-            tokens[merge_idx] = merged;
-            tokens.remove(merge_idx + 1);
-        }
-
-        // Convert tokens to IDs
+        // Greedy longest-match tokenization
         let mut result = Vec::new();
-        for token in tokens {
-            if let Some(&id) = self.vocab.get(&token) {
-                result.push(id);
-            } else {
-                // Fallback to byte encoding
-                for byte in token.bytes() {
-                    let byte_token = format!("<0x{:02X}>", byte);
-                    if let Some(&id) = self.vocab.get(&byte_token) {
-                        result.push(id);
-                    } else {
-                        result.push(self.special_tokens.unk_token_id);
+        let text_bytes = text.as_bytes();
+        let mut i = 0;
+
+        while i < text_bytes.len() {
+            let mut matched = false;
+
+            // Try to match the longest possible token starting at position i
+            // Start from current position to end, trying progressively shorter substrings
+            let mut max_len = (text_bytes.len() - i).min(256); // Limit max token length
+
+            while max_len > 0 {
+                let end = i + max_len;
+                if end <= text_bytes.len() {
+                    if let Ok(substring) = std::str::from_utf8(&text_bytes[i..end]) {
+                        if let Some(&id) = self.vocab.get(substring) {
+                            result.push(id);
+                            i = end;
+                            matched = true;
+                            break;
+                        }
                     }
                 }
+                max_len -= 1;
+            }
+
+            // If no token matched, try byte fallback
+            if !matched {
+                let byte = text_bytes[i];
+                let byte_token = format!("<0x{:02X}>", byte);
+                if let Some(&id) = self.vocab.get(&byte_token) {
+                    result.push(id);
+                } else {
+                    result.push(self.special_tokens.unk_token_id);
+                }
+                i += 1;
             }
         }
 

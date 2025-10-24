@@ -74,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Use a simple approach: run Ollama with very short output
     let output =
-        Command::new("ollama").args(&["run", "tinyllama", "-n", "1", "-p", prompt]).output()?;
+        Command::new("ollama").args(["run", "tinyllama", "-n", "1", "-p", prompt]).output()?;
 
     if !output.status.success() {
         println!("❌ Ollama failed: {}", String::from_utf8_lossy(&output.stderr));

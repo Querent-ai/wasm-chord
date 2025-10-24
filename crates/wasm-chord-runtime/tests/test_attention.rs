@@ -1,7 +1,7 @@
 /// Attention mechanism correctness tests
 ///
 /// Tests scaled dot-product attention, softmax properties, and causal masking
-use wasm_chord_runtime::{MultiHeadAttention, TransformerConfig};
+use wasm_chord_runtime::{attention::AttentionBackend, MultiHeadAttention, TransformerConfig};
 
 fn test_config() -> TransformerConfig {
     TransformerConfig {
@@ -14,6 +14,9 @@ fn test_config() -> TransformerConfig {
         rope_theta: 10000.0,
         rms_norm_eps: 1e-6,
         max_seq_len: 512,
+        // Use Standard attention for these legacy tests
+        // (They test the old compute_attention implementation details)
+        attention_backend: AttentionBackend::Standard,
     }
 }
 

@@ -54,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.hidden_size, config.num_heads, head_dim, config.num_kv_heads
     );
 
-    if config.hidden_size % config.num_heads != 0 {
+    if !config.hidden_size.is_multiple_of(config.num_heads) {
         println!("  ❌ head_dim is not integer!");
     } else {
         println!("  ✅ head_dim is integer");

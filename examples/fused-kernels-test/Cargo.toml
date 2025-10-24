@@ -11,3 +11,4 @@ doc = false
 [dependencies]
 wasm-chord-cpu = { path = "../../crates/wasm-chord-cpu" }
 wasm-chord-core = { path = "../../crates/wasm-chord-core" }
+half = { workspace = true }

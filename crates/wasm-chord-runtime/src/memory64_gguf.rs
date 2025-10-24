@@ -88,9 +88,15 @@ impl Memory64GGUFLoader {
     ) -> Result<Memory64Model> {
         println!("🚀 Loading GGUF model with Memory64 support...");
 
-        // Step 1: Parse GGUF header
+        // Step 1: Parse GGUF header (only if not already parsed)
         println!("📋 Parsing GGUF header...");
-        let meta = parser.parse_header()?;
+        let meta = if parser.metadata().is_some() {
+            // Header already parsed, use existing metadata
+            parser.metadata().unwrap().clone()
+        } else {
+            // Parse header for the first time
+            parser.parse_header()?
+        };
         self.meta = Some(meta.clone());
         println!(
             "✅ Parsed GGUF: {} tensors, architecture: {}",
@@ -312,7 +318,7 @@ impl Memory64GGUFLoader {
         let config = self.config.as_ref().unwrap().clone();
 
         self.layer_manager = Some(Memory64LayerManager::new(
-            runtime, config, 4, // Cache up to 4 layers
+            runtime, config, 16, // Cache up to 16 layers for better performance
         ));
 
         println!("✅ Layer manager created");

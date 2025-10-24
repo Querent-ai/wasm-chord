@@ -93,7 +93,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Coherence assessment
-        let is_coherent = assess_coherence(&result, &prompt);
+        let is_coherent = assess_coherence(&result, prompt);
         println!("   Coherence: {}", if is_coherent { "✅ GOOD" } else { "❌ POOR" });
         println!();
     }
@@ -126,7 +126,7 @@ fn assess_coherence(result: &str, _prompt: &str) -> bool {
     // Check for reasonable word lengths (not too short or too long)
     let avg_word_length: f32 =
         words.iter().map(|w| w.len()).sum::<usize>() as f32 / words.len() as f32;
-    if avg_word_length < 2.0 || avg_word_length > 15.0 {
+    if !(2.0..=15.0).contains(&avg_word_length) {
         return false;
     }
 

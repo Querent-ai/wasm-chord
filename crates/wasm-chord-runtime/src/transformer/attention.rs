@@ -7,19 +7,25 @@ use wasm_chord_cpu::{matmul_f32, matmul_transposed};
 use wasm_chord_gpu::GpuBackend;
 
 use super::{KVCache, TransformerConfig};
+use crate::attention::{create_attention, Attention};
+use crate::matmul_dispatch::dispatch_matmul;
+use crate::weight_format::WeightFormat;
 
 /// Multi-head attention layer
 #[allow(dead_code)]
 pub struct MultiHeadAttention {
     pub config: TransformerConfig,
     head_dim: usize,
+    attention_impl: Box<dyn Attention>,
 }
 
 #[allow(dead_code)]
 impl MultiHeadAttention {
     pub fn new(config: TransformerConfig) -> Self {
         let head_dim = config.hidden_size / config.num_heads;
-        Self { config, head_dim }
+        let attention_impl = create_attention(config.attention_backend);
+
+        Self { config, head_dim, attention_impl }
     }
 
     /// Helper: matrix multiplication with GPU/CPU fallback
@@ -32,10 +38,10 @@ impl MultiHeadAttention {
         k: usize,
         n: usize,
         transposed_b: bool,
-        #[cfg(feature = "webgpu")] gpu: Option<&GpuBackend>,
+        #[cfg(feature = "webgpu")] _gpu: Option<&GpuBackend>,
     ) -> Result<Vec<f32>> {
         #[cfg(feature = "webgpu")]
-        if let Some(gpu) = gpu {
+        if let Some(gpu) = _gpu {
             if !transposed_b {
                 if let Ok(result) = gpu.matmul(a, b, m as u32, k as u32, n as u32) {
                     return Ok(result);
@@ -70,62 +76,43 @@ impl MultiHeadAttention {
         weights: &AttentionWeights,
         kv_cache: &mut KVCache,
         position: usize,
-        #[cfg(feature = "webgpu")] gpu: Option<&GpuBackend>,
+        #[cfg(feature = "webgpu")] _gpu: Option<&GpuBackend>,
     ) -> Result<Vec<f32>> {
         let seq_len = hidden_states.len() / self.config.hidden_size;
         let hidden_size = self.config.hidden_size;
 
-        // Project to Q, K, V
+        // Project to Q, K, V using fused kernels
         // Q projection: [seq_len, hidden_size] x [hidden_size, hidden_size]
-        let q = self.matmul(
+        let q = dispatch_matmul(
             hidden_states,
             &weights.wq,
             seq_len,
             hidden_size,
             hidden_size,
-            true, // FIXED: GGUF stores weights in transposed format
-            #[cfg(feature = "webgpu")]
-            gpu,
+            #[cfg(any(feature = "webgpu", feature = "cuda", feature = "metal"))]
+            _gpu.map(|g| g as &dyn std::any::Any),
         )?;
 
-        // Debug Q weights and projection
-        if std::env::var("DEBUG_WEIGHTS").is_ok() {
-            eprintln!("  WQ weights (first 10): {:?}", &weights.wq[..10.min(weights.wq.len())]);
-            eprintln!(
-                "  WQ weights sum: {:.6}, mean: {:.6}",
-                weights.wq.iter().sum::<f32>(),
-                weights.wq.iter().sum::<f32>() / weights.wq.len() as f32
-            );
-            eprintln!("  Q projection (first 10): {:?}", &q[..10.min(q.len())]);
-            eprintln!(
-                "  Q projection sum: {:.6}, mean: {:.6}",
-                q.iter().sum::<f32>(),
-                q.iter().sum::<f32>() / q.len() as f32
-            );
-        }
-
         // K projection: [seq_len, hidden_size] x [hidden_size, num_kv_heads * head_dim]
-        let k = self.matmul(
+        let k = dispatch_matmul(
             hidden_states,
             &weights.wk,
             seq_len,
             hidden_size,
             self.config.num_kv_heads * self.head_dim,
-            true, // FIXED: GGUF stores weights in transposed format
-            #[cfg(feature = "webgpu")]
-            gpu,
+            #[cfg(any(feature = "webgpu", feature = "cuda", feature = "metal"))]
+            _gpu.map(|g| g as &dyn std::any::Any),
         )?;
 
         // V projection
-        let v = self.matmul(
+        let v = dispatch_matmul(
             hidden_states,
             &weights.wv,
             seq_len,
             hidden_size,
             self.config.num_kv_heads * self.head_dim,
-            true, // FIXED: GGUF stores weights in transposed format
-            #[cfg(feature = "webgpu")]
-            gpu,
+            #[cfg(any(feature = "webgpu", feature = "cuda", feature = "metal"))]
+            _gpu.map(|g| g as &dyn std::any::Any),
         )?;
 
         // DEBUG: Dump Q, K, V for layer 0
@@ -179,15 +166,14 @@ impl MultiHeadAttention {
         }
 
         // Output projection
-        let result = self.matmul(
+        let result = dispatch_matmul(
             &output,
             &weights.wo,
             seq_len,
             hidden_size,
             hidden_size,
-            true, // FIXED: GGUF stores weights in transposed format
-            #[cfg(feature = "webgpu")]
-            gpu,
+            #[cfg(any(feature = "webgpu", feature = "cuda", feature = "metal"))]
+            _gpu.map(|g| g as &dyn std::any::Any),
         )?;
 
         Ok(result)
@@ -321,14 +307,17 @@ impl MultiHeadAttention {
         output
     }
 
-    /// Compute scaled dot-product attention (Candle-style with batched operations)
+    /// Compute scaled dot-product attention using the configured attention backend
     ///
-    /// Follows Candle's approach:
+    /// Supports multiple attention implementations:
+    /// - Standard: Traditional O(N²) attention
+    /// - Flash: IO-aware Flash Attention (3-4x faster, O(N) memory)
+    ///
+    /// Process:
     /// 1. Repeat K/V for GQA (if num_heads != num_kv_heads)
-    /// 2. Compute attention scores: Q @ K^T / sqrt(head_dim)
-    /// 3. Apply causal mask
-    /// 4. Softmax over scores
-    /// 5. Apply attention: scores @ V
+    /// 2. Build causal mask
+    /// 3. Call attention implementation (Standard or Flash)
+    /// 4. Return output
     pub fn compute_attention(
         &self,
         q: &[f32],
@@ -363,75 +352,89 @@ impl MultiHeadAttention {
             eprintln!("  K/V repeated to shape: [{}x{}x{}]", kv_seq_len, num_heads, head_dim);
         }
 
-        // Compute attention for each head independently
-        let mut output = vec![0.0; seq_len * num_heads * head_dim];
-        let scale = 1.0 / (head_dim as f32).sqrt();
-
-        for h in 0..num_heads {
-            for i in 0..seq_len {
-                // Get query vector: Q[i, h, :]
-                let q_offset = (i * num_heads + h) * head_dim;
-                let q_vec = &q[q_offset..q_offset + head_dim];
-
-                // Compute scores = Q[i,h] @ K[j,h]^T for all j
-                let mut scores = vec![0.0; kv_seq_len];
-                for (j, score_ref) in scores.iter_mut().enumerate().take(kv_seq_len) {
-                    let k_offset = (j * num_heads + h) * head_dim;
-                    let k_vec = &k_repeated[k_offset..k_offset + head_dim];
-
-                    // Dot product: Q @ K^T
-                    let mut score = 0.0;
-                    for d in 0..head_dim {
-                        score += q_vec[d] * k_vec[d];
-                    }
-                    *score_ref = score * scale;
-
-                    // Causal masking
-                    let query_abs_pos = position + i;
-                    if j > query_abs_pos {
-                        *score_ref = f32::NEG_INFINITY;
-                    }
-                }
-
-                // Softmax
-                let max_score = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                let mut exp_sum = 0.0;
-                for score in &mut scores {
-                    if score.is_finite() {
-                        *score = (*score - max_score).exp();
-                        exp_sum += *score;
-                    } else {
-                        *score = 0.0;
-                    }
-                }
-                if exp_sum > 0.0 {
-                    for score in &mut scores {
-                        *score /= exp_sum;
-                    }
-                }
-
-                // Debug attention weights
-                if std::env::var("DEBUG_ATTN_WEIGHTS").is_ok() && h == 0 && i == 0 {
-                    eprintln!(
-                        "  Attention weights (head 0, query 0): {:?}",
-                        &scores[..kv_seq_len.min(5)]
-                    );
-                }
-
-                // Weighted sum: output = scores @ V
-                let out_offset = (i * num_heads + h) * head_dim;
-                for (j, &weight) in scores.iter().enumerate().take(kv_seq_len) {
-                    let v_offset = (j * num_heads + h) * head_dim;
-                    let v_vec = &v_repeated[v_offset..v_offset + head_dim];
-
-                    for d in 0..head_dim {
-                        output[out_offset + d] += weight * v_vec[d];
-                    }
+        // Build causal mask: mask[i, j] = 0.0 if j > position + i (masked), 1.0 if allowed
+        // Attention implementations expect 0.0 = masked, non-zero = allowed
+        let mut mask = vec![1.0; seq_len * kv_seq_len];
+        for i in 0..seq_len {
+            let query_abs_pos = position + i;
+            for j in 0..kv_seq_len {
+                if j > query_abs_pos {
+                    mask[i * kv_seq_len + j] = 0.0; // Mask future tokens
                 }
             }
         }
 
+        // Call the attention implementation (Flash or Standard)
+        // Input layout: [seq_len, num_heads, head_dim]
+        // Attention trait expects: [batch=1, num_heads, seq_len, head_dim]
+        // We need to reshape: transpose from [seq_len, num_heads, head_dim] to [num_heads, seq_len, head_dim]
+
+        let q_transposed = self.transpose_for_attention(q, seq_len, num_heads, head_dim);
+        let k_transposed =
+            self.transpose_for_attention(&k_repeated, kv_seq_len, num_heads, head_dim);
+        let v_transposed =
+            self.transpose_for_attention(&v_repeated, kv_seq_len, num_heads, head_dim);
+
+        // Call attention (batch_size=1 for single sequence)
+        let output_transposed = self.attention_impl.forward(
+            &q_transposed,
+            &k_transposed,
+            &v_transposed,
+            Some(&mask),
+            1, // batch_size
+            num_heads,
+            seq_len,
+            kv_seq_len,
+            head_dim,
+        )?;
+
+        // Transpose back: [num_heads, seq_len, head_dim] -> [seq_len, num_heads, head_dim]
+        let output =
+            self.transpose_from_attention(&output_transposed, seq_len, num_heads, head_dim);
+
         Ok(output)
+    }
+
+    /// Transpose from [seq_len, num_heads, head_dim] to [num_heads, seq_len, head_dim]
+    fn transpose_for_attention(
+        &self,
+        tensor: &[f32],
+        seq_len: usize,
+        num_heads: usize,
+        head_dim: usize,
+    ) -> Vec<f32> {
+        let mut output = vec![0.0; seq_len * num_heads * head_dim];
+        for s in 0..seq_len {
+            for h in 0..num_heads {
+                for d in 0..head_dim {
+                    let src_idx = (s * num_heads + h) * head_dim + d;
+                    let dst_idx = (h * seq_len + s) * head_dim + d;
+                    output[dst_idx] = tensor[src_idx];
+                }
+            }
+        }
+        output
+    }
+
+    /// Transpose from [num_heads, seq_len, head_dim] to [seq_len, num_heads, head_dim]
+    fn transpose_from_attention(
+        &self,
+        tensor: &[f32],
+        seq_len: usize,
+        num_heads: usize,
+        head_dim: usize,
+    ) -> Vec<f32> {
+        let mut output = vec![0.0; seq_len * num_heads * head_dim];
+        for h in 0..num_heads {
+            for s in 0..seq_len {
+                for d in 0..head_dim {
+                    let src_idx = (h * seq_len + s) * head_dim + d;
+                    let dst_idx = (s * num_heads + h) * head_dim + d;
+                    output[dst_idx] = tensor[src_idx];
+                }
+            }
+        }
+        output
     }
 }
 
@@ -440,13 +443,13 @@ impl MultiHeadAttention {
 #[allow(dead_code)]
 pub struct AttentionWeights {
     /// Query projection [hidden_size, hidden_size]
-    pub wq: Vec<f32>,
+    pub wq: WeightFormat,
     /// Key projection [hidden_size, num_kv_heads * head_dim]
-    pub wk: Vec<f32>,
+    pub wk: WeightFormat,
     /// Value projection [hidden_size, num_kv_heads * head_dim]
-    pub wv: Vec<f32>,
+    pub wv: WeightFormat,
     /// Output projection [hidden_size, hidden_size]
-    pub wo: Vec<f32>,
+    pub wo: WeightFormat,
 }
 
 #[allow(dead_code)]
@@ -456,10 +459,10 @@ impl AttentionWeights {
         let kv_size = config.num_kv_heads * (hidden_size / config.num_heads);
 
         Self {
-            wq: vec![0.0; hidden_size * hidden_size],
-            wk: vec![0.0; hidden_size * kv_size],
-            wv: vec![0.0; hidden_size * kv_size],
-            wo: vec![0.0; hidden_size * hidden_size],
+            wq: WeightFormat::new_f32(hidden_size * hidden_size),
+            wk: WeightFormat::new_f32(hidden_size * kv_size),
+            wv: WeightFormat::new_f32(hidden_size * kv_size),
+            wo: WeightFormat::new_f32(hidden_size * hidden_size),
         }
     }
 }

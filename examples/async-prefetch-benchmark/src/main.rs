@@ -6,6 +6,7 @@
 use wasm_chord_runtime::async_prefetch::{AsyncPrefetchConfig, AsyncMemory64Model};
 use wasm_chord_runtime::memory64_layer_manager::{Memory64LayerManager, Memory64Model};
 use wasm_chord_runtime::memory64::MemoryLayout;
+use wasm_chord_runtime::attention::AttentionBackend;
 use wasm_chord_core::error::Result;
 use std::time::Instant;
 
@@ -26,6 +27,7 @@ async fn main() -> Result<()> {
         num_kv_heads: 32,
         max_seq_len: 2048,
         rope_theta: 10000.0,
+        attention_backend: AttentionBackend::Auto,
         ..Default::default()
     };
 

@@ -3,11 +3,28 @@
 //! Provides both C ABI and wasm-bindgen interfaces for host integration.
 
 mod abi;
+// mod benchmark;  // Not implemented yet
+// mod cache_aware_blocking;  // Not implemented yet
 mod chat;
 mod context;
 mod inference;
 mod memory;
+// mod memory_pool;  // Not implemented yet
+// mod multithreading;  // Not implemented yet
+mod async_prefetch;
+pub mod attention;
+mod gpu_integration_test;
+mod matmul_dispatch;
 pub mod memory64;
+mod multi_memory;
+mod sampling;
+mod sharding;
+pub mod streaming;
+mod tensor_loader_ext;
+mod transformer;
+#[cfg(target_arch = "wasm32")]
+mod web;
+mod weight_format;
 
 // Host-side Memory64 runtime (production-hardened)
 #[cfg(feature = "memory64-host")]
@@ -28,19 +45,6 @@ pub mod memory64_layer_manager;
 // Memory64 GGUF integration
 #[cfg(feature = "memory64")]
 pub mod memory64_gguf;
-
-// Async background prefetch optimization
-#[cfg(feature = "async-prefetch")]
-pub mod async_prefetch;
-
-mod multi_memory;
-mod sampling;
-mod sharding;
-pub mod streaming;
-mod transformer;
-
-#[cfg(target_arch = "wasm32")]
-mod web;
 
 pub use abi::*;
 pub use chat::{ChatMessage, ChatRole, ChatTemplate};
@@ -98,6 +102,7 @@ impl From<Error> for ErrorCode {
             Error::Io(_) => ErrorCode::IoError,
             Error::Runtime(_) => ErrorCode::GenericFailure,
             Error::Unknown(_) => ErrorCode::GenericFailure,
+            Error::NotImplemented(_) => ErrorCode::BackendUnsupported,
         }
     }
 }

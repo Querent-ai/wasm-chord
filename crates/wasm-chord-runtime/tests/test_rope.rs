@@ -2,7 +2,7 @@
 ///
 /// Based on llama.cpp's test-rope.cpp
 /// Tests rotation properties, reversibility, and position encoding
-use wasm_chord_runtime::{MultiHeadAttention, TransformerConfig};
+use wasm_chord_runtime::{attention::AttentionBackend, MultiHeadAttention, TransformerConfig};
 
 /// Helper to create a test config
 fn test_config() -> TransformerConfig {
@@ -16,6 +16,7 @@ fn test_config() -> TransformerConfig {
         rope_theta: 10000.0,
         rms_norm_eps: 1e-6,
         max_seq_len: 512,
+        attention_backend: AttentionBackend::Auto,
     }
 }
 
